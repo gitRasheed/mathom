@@ -1,0 +1,13 @@
+# Rust
+/target/
+
+# Frontend
+ui/node_modules/
+ui/dist/
+
+# Tauri build output
+src-tauri/gen/
+
+# OS noise
+Thumbs.db
+.DS_Store

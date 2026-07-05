@@ -1,0 +1,15 @@
+[package]
+name = "mathom-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mathom-core = { version = "0.1.0", path = "../crates/core" }
+mathom-scanner = { version = "0.1.0", path = "../crates/scanner" }
+mathom-scanner-ntfs = { version = "0.1.0", path = "../crates/scanner-ntfs" }
+serde = "1.0.228"
+serde_json = "1.0.150"
+tauri = "2.11.5"
+
+[build-dependencies]
+tauri-build = "2.6.3"
