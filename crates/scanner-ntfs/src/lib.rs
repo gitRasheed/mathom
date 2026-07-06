@@ -16,7 +16,7 @@ pub mod runs;
 #[cfg(all(windows, feature = "mft-backend"))]
 mod scanner;
 #[cfg(all(windows, feature = "mft-backend"))]
-mod volume;
+pub mod volume;
 
 #[cfg(all(windows, feature = "mft-backend"))]
 pub use scanner::MftScanner;

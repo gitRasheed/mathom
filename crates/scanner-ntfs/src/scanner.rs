@@ -80,12 +80,16 @@ fn scan_inner(
     cancel: &AtomicBool,
     start: Instant,
 ) -> Result<ScanStats, String> {
+    // Set MATHOM_MFT_TIMINGS=1 for per-stage numbers on stderr (the
+    // benchmark harness relies on this to keep regressions attributable).
+    let timings = std::env::var_os("MATHOM_MFT_TIMINGS").is_some();
     let loc = locate(&options.root)?;
     if !is_ntfs(&loc.mount) {
         return Err(format!("{} is not on an NTFS volume", loc.mount));
     }
     let volume = Volume::open(&loc.mount)?;
     let map = map_mft(&volume, &loc.mount)?;
+    let t_mapped = Instant::now();
 
     let record_size = map.geometry.record_size as usize;
     let total_records = (map.mft_bytes / record_size as u64) as usize;
@@ -139,6 +143,7 @@ fn scan_inner(
             ..ScanStats::default()
         });
     }
+    let t_swept = Instant::now();
 
     let table = sweep.finish();
     let components: Vec<&str> = loc.components.iter().map(String::as_str).collect();
@@ -151,6 +156,20 @@ fn scan_inner(
         |b| !cancel.load(Ordering::Relaxed) && tx.send(ScanEvent::Batch(b)).is_ok(),
     )
     .map_err(|e| e.to_string())?;
+
+    if timings {
+        eprintln!(
+            "mft timings: map={:.1?} read+parse={:.1?} ({:.2} GB/s over {} MiB, {} records) \
+             patch+assemble+emit={:.1?} total={:.1?}",
+            t_mapped - start,
+            t_swept - t_mapped,
+            map.mft_bytes as f64 / 1e9 / (t_swept - t_mapped).as_secs_f64(),
+            map.mft_bytes >> 20,
+            total_records,
+            t_swept.elapsed(),
+            start.elapsed(),
+        );
+    }
 
     Ok(ScanStats {
         files: stats.files,

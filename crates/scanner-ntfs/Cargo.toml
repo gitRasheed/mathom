@@ -29,6 +29,21 @@ windows = { version = "0.62.2", optional = true, features = [
     "Win32_Security",
 ] }
 
+[dev-dependencies]
+criterion = "0.8.2"
+
 [[test]]
 name = "oracle"
 required-features = ["oracle-tests"]
+
+[[bench]]
+name = "mft"
+harness = false
+
+[[example]]
+name = "mft_scan"
+required-features = ["mft-backend"]
+
+[[example]]
+name = "dump_mft"
+required-features = ["mft-backend"]
