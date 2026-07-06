@@ -83,7 +83,8 @@ pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordF
     let used = u32_at(rec, 0x18) as usize;
     let base_ref = RecordRef(u64_at(rec, 0x20));
     let limit = used.min(rec.len());
-    if first_attr < 0x30 || first_attr + 8 > limit {
+    // The attribute area may legitimately be just the 4-byte end marker.
+    if first_attr < 0x30 || first_attr + 4 > limit {
         return Err(ParseError("attribute offset out of bounds"));
     }
 

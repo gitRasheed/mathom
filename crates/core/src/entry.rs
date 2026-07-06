@@ -32,6 +32,10 @@ impl EntryFlags {
         self.0 |= other.0;
     }
 
+    pub fn remove(&mut self, other: EntryFlags) {
+        self.0 &= !other.0;
+    }
+
     pub fn union(self, other: EntryFlags) -> EntryFlags {
         EntryFlags(self.0 | other.0)
     }

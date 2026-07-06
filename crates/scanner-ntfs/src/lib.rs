@@ -6,8 +6,10 @@
 
 use std::fmt;
 
+pub mod assemble;
 pub mod boot;
 pub mod fixture;
+pub mod pipeline;
 pub mod record;
 pub mod runs;
 
