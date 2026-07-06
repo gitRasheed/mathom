@@ -92,6 +92,9 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
   const byIdRef = useRef<Map<number, TreemapRect>>(new Map());
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
   const rootIdRef = useRef(0);
+  // Between drill start and the new layout landing, the rect list describes
+  // the OLD view — clicks/hover against it would hit stale geometry.
+  const hitFrozenRef = useRef(false);
   const lastFetchRef = useRef(0);
   const fetchSeqRef = useRef(0);
   const zoomRafRef = useRef(0);
@@ -201,10 +204,12 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
       if (seq !== fetchSeqRef.current || rootId !== rootIdRef.current) return;
       rectsRef.current = rects;
       byIdRef.current = new Map(rects.map((r) => [r.id, r]));
+      hitFrozenRef.current = false;
       setHasRects(rects.length > 0);
       bake();
     } catch {
       // stale generation
+      if (seq === fetchSeqRef.current) hitFrozenRef.current = false;
     }
   }, [generation, bake]);
 
@@ -225,6 +230,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     setCrumbs([]);
     setTooltip(null);
     hoverRef.current = null;
+    hitFrozenRef.current = false;
     offscreenRef.current = null;
     const base = baseRef.current;
     if (base) base.getContext("2d")!.clearRect(0, 0, base.width, base.height);
@@ -286,6 +292,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
   }, [selected, drawOverlay]);
 
   const hitTest = useCallback((cssX: number, cssY: number): TreemapRect | null => {
+    if (hitFrozenRef.current) return null;
     const rects = rectsRef.current;
     // Reverse iteration = deepest-first (parents are emitted before children).
     for (let i = rects.length - 1; i >= 0; i--) {
@@ -348,6 +355,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     (id: number, zoomFrom?: TreemapRect) => {
       if (id === rootIdRef.current) return;
       rootIdRef.current = id;
+      hitFrozenRef.current = true;
       setTooltip(null);
       hoverRef.current = null;
 
@@ -401,12 +409,60 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
+      if (zoomRafRef.current !== 0) return; // still animating the last drill
       const bounds = containerRef.current!.getBoundingClientRect();
       const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
       if (hit?.isDir) drillTo(hit.id, hit);
     },
     [hitTest, drillTo],
   );
+
+  const zoomOut = useCallback(() => {
+    if (crumbs.length < 2 || hitFrozenRef.current) return;
+    drillTo(crumbs[crumbs.length - 2].id);
+  }, [crumbs, drillTo]);
+
+  // Wheel down = up one level; wheel up = into the top-level directory
+  // under the cursor. Drilling freezes hits, which also throttles the wheel.
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (e.deltaY > 0) {
+        zoomOut();
+        return;
+      }
+      const bounds = containerRef.current!.getBoundingClientRect();
+      const x = e.clientX - bounds.left;
+      const y = e.clientY - bounds.top;
+      if (hitFrozenRef.current) return;
+      for (const r of rectsRef.current) {
+        if (
+          r.depth === 1 &&
+          r.isDir &&
+          x >= r.x &&
+          x < r.x + r.w &&
+          y >= r.y &&
+          y < r.y + r.h
+        ) {
+          drillTo(r.id, r);
+          return;
+        }
+      }
+    },
+    [zoomOut, drillTo],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      if (e.key === "Backspace" || (e.altKey && e.key === "ArrowUp")) {
+        e.preventDefault();
+        zoomOut();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomOut]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -439,6 +495,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
         onMouseLeave={handleLeave}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onWheel={handleWheel}
       >
         <canvas ref={baseRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={overlayRef} className="absolute inset-0 h-full w-full" />

@@ -28,20 +28,27 @@ export default function App() {
   );
 
   // Treemap click: select + expand the ancestor chain so the tree can scroll
-  // the node into view.
+  // the node into view. Click-ladder: clicking the already-selected tile
+  // walks the selection up one level (leaves cover their folders, so this is
+  // how folder levels get selected).
   const handleTreemapSelect = useCallback(
     (id: number) => {
-      handleSelect(id);
-      if (generation === 0) return;
+      if (generation === 0) {
+        handleSelect(id);
+        return;
+      }
       api
         .getAncestors(generation, id)
-        .then((crumbs) => {
-          expandMany(crumbs.slice(0, -1).map((c) => c.id));
-          setRevealId(id);
+        .then((chain) => {
+          if (id === selected && chain.length >= 2) chain = chain.slice(0, -1);
+          const target = chain[chain.length - 1];
+          handleSelect(target.id);
+          expandMany(chain.slice(0, -1).map((c) => c.id));
+          setRevealId(target.id);
         })
         .catch(() => {});
     },
-    [handleSelect, generation, expandMany],
+    [handleSelect, generation, selected, expandMany],
   );
 
   const handleRevealed = useCallback(() => setRevealId(null), []);
