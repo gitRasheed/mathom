@@ -7,6 +7,8 @@
 use std::fmt;
 
 pub mod boot;
+pub mod fixture;
+pub mod record;
 pub mod runs;
 
 /// Parse-boundary failure: a static reason, no allocation. A corrupt or
