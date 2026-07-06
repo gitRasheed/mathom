@@ -38,8 +38,10 @@ interface TreeRowProps {
   flat: FlatRow[];
   expanded: ReadonlySet<number>;
   selected: number | null;
+  hoveredId: number | null;
   onToggle: (id: number) => void;
-  onSelect: (id: number) => void;
+  onSelect: (row: Row) => void;
+  onHoverRow: (id: number | null) => void;
 }
 
 function TreeRow({
@@ -48,22 +50,30 @@ function TreeRow({
   flat,
   expanded,
   selected,
+  hoveredId,
   onToggle,
   onSelect,
+  onHoverRow,
 }: RowComponentProps<TreeRowProps>) {
   const { row, depth } = flat[index];
   const isSelected = selected === row.id;
+  const isHovered = hoveredId === row.id;
 
   return (
     <div
       style={{ ...style, display: "grid", gridTemplateColumns: GRID_COLS }}
       className={`items-center text-[13px] ${
-        isSelected ? "bg-zinc-800/80" : "hover:bg-zinc-900"
+        isSelected
+          ? "bg-zinc-800/80"
+          : isHovered
+            ? "bg-teal-900/25"
+            : "hover:bg-zinc-900"
       }`}
-      onClick={() => onSelect(row.id)}
+      onClick={() => onSelect(row)}
       onDoubleClick={() => {
         if (row.isDir && row.hasChildren) onToggle(row.id);
       }}
+      onMouseEnter={() => onHoverRow(row.id)}
     >
       <div
         className="flex min-w-0 items-center"
@@ -182,11 +192,14 @@ export interface TreeViewProps {
   expanded: ReadonlySet<number>;
   sort: Sort;
   selected: number | null;
+  /** Node hovered in the treemap — highlighted here when visible. */
+  hoveredId: number | null;
   /** Scroll this node into view once it appears in the flattened rows. */
   revealId: number | null;
   onRevealed: () => void;
   onToggle: (id: number) => void;
-  onSelect: (id: number) => void;
+  onSelect: (row: Row) => void;
+  onHoverRow: (id: number | null) => void;
   onSort: (key: SortKey) => void;
 }
 
@@ -196,10 +209,12 @@ export function TreeView({
   expanded,
   sort,
   selected,
+  hoveredId,
   revealId,
   onRevealed,
   onToggle,
   onSelect,
+  onHoverRow,
   onSort,
 }: TreeViewProps) {
   const listRef = useListRef(null);
@@ -221,13 +236,21 @@ export function TreeView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Header sort={sort} onSort={onSort} />
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1" onMouseLeave={() => onHoverRow(null)}>
         <List
           listRef={listRef}
           rowComponent={TreeRow}
           rowCount={flat.length}
           rowHeight={ROW_HEIGHT}
-          rowProps={{ flat, expanded, selected, onToggle, onSelect }}
+          rowProps={{
+            flat,
+            expanded,
+            selected,
+            hoveredId,
+            onToggle,
+            onSelect,
+            onHoverRow,
+          }}
           className="h-full"
         />
       </div>

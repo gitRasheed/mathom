@@ -4,7 +4,7 @@ import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
 import { Treemap } from "./components/Treemap";
 import { useScan } from "./hooks/useScan";
-import { api, type Snapshot } from "./lib/api";
+import { api, type Row, type Snapshot, type TreemapRect } from "./lib/api";
 import { onUiError, reportUnlessStale } from "./lib/errors";
 
 const TREE_PANE_MIN = 320;
@@ -14,6 +14,9 @@ export default function App() {
   const scan = useScan();
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // What the treemap shows: the selected folder (or a file's parent folder).
+  const [viewRootId, setViewRootId] = useState(0);
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [revealId, setRevealId] = useState<number | null>(null);
   const [treeWidth, setTreeWidth] = useState(560);
   const [uiError, setUiError] = useState<string | null>(null);
@@ -34,7 +37,7 @@ export default function App() {
 
   const { pathOf, start, expandMany, generation } = scan;
 
-  const handleSelect = useCallback(
+  const select = useCallback(
     (id: number) => {
       setSelected(id);
       void pathOf(id).then(setSelectedPath);
@@ -42,29 +45,48 @@ export default function App() {
     [pathOf],
   );
 
-  // Treemap click: select + expand the ancestor chain so the tree can scroll
-  // the node into view. Click-ladder: clicking the already-selected tile
-  // walks the selection up one level (leaves cover their folders, so this is
-  // how folder levels get selected).
-  const handleTreemapSelect = useCallback(
-    (id: number) => {
-      if (generation === 0) {
-        handleSelect(id);
-        return;
+  // Tree click: a folder becomes the treemap view; a file shows its parent
+  // folder with the file outlined.
+  const handleTreeSelect = useCallback(
+    (row: Row) => {
+      select(row.id);
+      if (row.isDir) {
+        setViewRootId(row.id);
+      } else if (generation !== 0) {
+        api
+          .getAncestors(generation, row.id)
+          .then((chain) => {
+            const parent = chain[chain.length - 2];
+            if (parent) setViewRootId(parent.id);
+          })
+          .catch((e) => reportUnlessStale("locating parent", e));
       }
+    },
+    [select, generation],
+  );
+
+  // Treemap click: select + reveal in the tree. Folders (rarely hit — their
+  // tiles are covered) also become the view; files never move the view.
+  const handleTreemapSelect = useCallback(
+    (rect: TreemapRect) => {
+      select(rect.id);
+      if (rect.isDir) setViewRootId(rect.id);
+      if (generation === 0) return;
       api
-        .getAncestors(generation, id)
+        .getAncestors(generation, rect.id)
         .then((chain) => {
-          if (id === selected && chain.length >= 2) chain = chain.slice(0, -1);
-          const target = chain[chain.length - 1];
-          handleSelect(target.id);
           expandMany(chain.slice(0, -1).map((c) => c.id));
-          setRevealId(target.id);
+          setRevealId(rect.id);
         })
         .catch((e) => reportUnlessStale("revealing selection", e));
     },
-    [handleSelect, generation, selected, expandMany],
+    [select, generation, expandMany],
   );
+
+  // Breadcrumb / zoom gestures: pure navigation, selection stays put.
+  const handleNavigate = useCallback((id: number) => {
+    setViewRootId(id);
+  }, []);
 
   const handleRevealed = useCallback(() => setRevealId(null), []);
 
@@ -72,6 +94,8 @@ export default function App() {
     (path: string) => {
       setSelected(null);
       setSelectedPath(null);
+      setViewRootId(0);
+      setHoveredId(null);
       setRevealId(null);
       void start(path);
     },
@@ -123,10 +147,12 @@ export default function App() {
               expanded={scan.expanded}
               sort={scan.sort}
               selected={selected}
+              hoveredId={hoveredId}
               revealId={revealId}
               onRevealed={handleRevealed}
               onToggle={scan.toggleExpand}
-              onSelect={handleSelect}
+              onSelect={handleTreeSelect}
+              onHoverRow={setHoveredId}
               onSort={scan.changeSort}
             />
           </div>
@@ -137,8 +163,12 @@ export default function App() {
           <Treemap
             snapshot={scan.snapshot}
             generation={generation}
+            rootId={viewRootId}
             selected={selected}
+            hoveredId={hoveredId}
             onSelect={handleTreemapSelect}
+            onHover={setHoveredId}
+            onNavigate={handleNavigate}
           />
         </div>
       ) : (

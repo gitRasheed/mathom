@@ -5,17 +5,23 @@
 //   gaps instead of strokes), one stretched highlight sprite per leaf as a
 //   cheap cushion approximation — then blitted. Hover/selection outlines
 //   live on a separate overlay canvas so mousemove never rebakes.
-// - Drill-down animates the cached bitmap (drawImage source-rect zoom),
-//   then swaps in the freshly baked layout.
+//
+// Interaction model: the view root is CONTROLLED by App (`rootId`), which
+// derives it from the selection — selecting a folder shows that folder.
+// This component only reports intent: onSelect (tile clicked), onHover
+// (for tree-row sync), onNavigate (breadcrumb / zoom gestures). When the
+// rootId prop changes, the old bitmap zooms (drawImage source-rect
+// animation) while the new layout is fetched; hit-testing freezes until it
+// lands so clicks never act on stale geometry.
 
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { api, type Crumb, type Row, type Snapshot, type TreemapRect } from "../lib/api";
+  api,
+  type Crumb,
+  type Row,
+  type Snapshot,
+  type TreemapRect,
+} from "../lib/api";
 import { isStale, reportUnlessStale } from "../lib/errors";
 import { formatBytes, formatPercent } from "../lib/format";
 
@@ -79,11 +85,27 @@ interface TooltipData {
 export interface TreemapProps {
   snapshot: Snapshot | null;
   generation: number;
+  /** View root — controlled by App, derived from the selection. */
+  rootId: number;
   selected: number | null;
-  onSelect: (id: number) => void;
+  /** Node hovered in the tree pane — outlined here when visible. */
+  hoveredId: number | null;
+  onSelect: (rect: TreemapRect) => void;
+  onHover: (id: number | null) => void;
+  /** Request a different view root (breadcrumb, zoom in/out gestures). */
+  onNavigate: (id: number) => void;
 }
 
-export function Treemap({ snapshot, generation, selected, onSelect }: TreemapProps) {
+export function Treemap({
+  snapshot,
+  generation,
+  rootId,
+  selected,
+  hoveredId,
+  onSelect,
+  onHover,
+  onNavigate,
+}: TreemapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -97,7 +119,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
   // the OLD view — clicks/hover against it would hit stale geometry.
   const hitFrozenRef = useRef(false);
   // Root the current crumbs belong to; names are immutable, so crumbs only
-  // need refetching when the drill root changes (not on every tick).
+  // need refetching when the view root changes (not on every tick).
   const crumbsRootRef = useRef<number | null>(null);
   const lastFetchRef = useRef(0);
   const fetchSeqRef = useRef(0);
@@ -116,7 +138,8 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     ctx.clearRect(0, 0, overlay.width, overlay.height);
     const dpr = window.devicePixelRatio || 1;
     const outline = (id: number | null, color: string, width: number) => {
-      if (id === null) return;
+      // The view root fills the canvas; outlining it is pure noise.
+      if (id === null || id === rootIdRef.current) return;
       const r = byIdRef.current.get(id);
       if (!r) return;
       const s = snap(r, dpr, 0);
@@ -125,8 +148,8 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
       ctx.strokeRect(s.x + width / 2, s.y + width / 2, s.w - width, s.h - width);
     };
     outline(selected, "#f4f4f5", 2);
-    if (hoverRef.current !== selected) outline(hoverRef.current, "#2dd4bf", 2);
-  }, [selected]);
+    if (hoveredId !== selected) outline(hoveredId, "#2dd4bf", 2);
+  }, [selected, hoveredId]);
 
   const blit = useCallback(() => {
     const base = baseRef.current;
@@ -195,11 +218,11 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
 
   const refreshCrumbs = useCallback(() => {
     if (generation === 0) return;
-    const rootId = rootIdRef.current;
+    const forRoot = rootIdRef.current;
     api
-      .getAncestors(generation, rootId)
+      .getAncestors(generation, forRoot)
       .then((crumbs) => {
-        crumbsRootRef.current = rootId;
+        crumbsRootRef.current = forRoot;
         setCrumbs(crumbs);
       })
       .catch((e) => {
@@ -213,28 +236,86 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
 
   const fetchLayout = useCallback(async () => {
     const container = containerRef.current;
-    if (!container || generation === 0) return;
+    if (!container || generation === 0) {
+      hitFrozenRef.current = false;
+      return;
+    }
     const w = container.clientWidth;
     const h = container.clientHeight;
-    if (w < 10 || h < 10) return;
+    if (w < 10 || h < 10) {
+      hitFrozenRef.current = false;
+      return;
+    }
 
     const seq = ++fetchSeqRef.current;
-    const rootId = rootIdRef.current;
+    const forRoot = rootIdRef.current;
     lastFetchRef.current = performance.now();
     try {
-      const rects = await api.getTreemap(generation, rootId, w, h);
-      if (seq !== fetchSeqRef.current || rootId !== rootIdRef.current) return;
+      const rects = await api.getTreemap(generation, forRoot, w, h);
+      if (seq !== fetchSeqRef.current || forRoot !== rootIdRef.current) return;
       rectsRef.current = rects;
       byIdRef.current = new Map(rects.map((r) => [r.id, r]));
       hitFrozenRef.current = false;
       setHasRects(rects.length > 0);
       bake();
-      if (crumbsRootRef.current !== rootId) refreshCrumbs();
+      if (crumbsRootRef.current !== forRoot) refreshCrumbs();
     } catch (e) {
       reportUnlessStale("loading treemap", e);
       if (seq === fetchSeqRef.current) hitFrozenRef.current = false;
     }
   }, [generation, bake, refreshCrumbs]);
+
+  const drillTo = useCallback(
+    (id: number) => {
+      if (id === rootIdRef.current) return;
+      const zoomFrom = byIdRef.current.get(id);
+      rootIdRef.current = id;
+      hitFrozenRef.current = true;
+      setTooltip(null);
+      hoverRef.current = null;
+
+      // Bitmap zoom toward the target's old rect while the layout loads;
+      // navigating to something not in view (breadcrumb, tree) swaps flat.
+      const base = baseRef.current;
+      const off = offscreenRef.current;
+      if (zoomFrom && zoomFrom.isDir && base && off) {
+        const dpr = window.devicePixelRatio || 1;
+        const target = snap(zoomFrom, dpr, 0);
+        const frozen = document.createElement("canvas");
+        frozen.width = off.width;
+        frozen.height = off.height;
+        frozen.getContext("2d")!.drawImage(off, 0, 0);
+        const start = performance.now();
+        const ctx = base.getContext("2d")!;
+        const step = () => {
+          const t = Math.min(1, (performance.now() - start) / ZOOM_MS);
+          const ease = 1 - (1 - t) * (1 - t);
+          const sx = target.x * ease;
+          const sy = target.y * ease;
+          const sw = frozen.width + (target.w - frozen.width) * ease;
+          const sh = frozen.height + (target.h - frozen.height) * ease;
+          ctx.clearRect(0, 0, base.width, base.height);
+          ctx.drawImage(frozen, sx, sy, sw, sh, 0, 0, base.width, base.height);
+          if (t < 1) {
+            zoomRafRef.current = requestAnimationFrame(step);
+          } else {
+            zoomRafRef.current = 0;
+            blit();
+          }
+        };
+        cancelAnimationFrame(zoomRafRef.current);
+        zoomRafRef.current = requestAnimationFrame(step);
+      }
+
+      void fetchLayout();
+    },
+    [blit, fetchLayout],
+  );
+
+  // The view root is controlled: App changed it (selection / navigation).
+  useEffect(() => {
+    drillTo(rootId);
+  }, [rootId, drillTo]);
 
   // New scan: reset drill state and clear the canvas.
   useEffect(() => {
@@ -300,7 +381,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
 
   useEffect(() => {
     drawOverlay();
-  }, [selected, drawOverlay]);
+  }, [drawOverlay]);
 
   const hitTest = useCallback((cssX: number, cssY: number): TreemapRect | null => {
     if (hitFrozenRef.current) return null;
@@ -309,6 +390,24 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     for (let i = rects.length - 1; i >= 0; i--) {
       const r = rects[i];
       if (cssX >= r.x && cssX < r.x + r.w && cssY >= r.y && cssY < r.y + r.h) {
+        return r;
+      }
+    }
+    return null;
+  }, []);
+
+  /// The depth-1 directory under the point: the "region" zoom gestures use.
+  const regionAt = useCallback((cssX: number, cssY: number): TreemapRect | null => {
+    if (hitFrozenRef.current) return null;
+    for (const r of rectsRef.current) {
+      if (
+        r.depth === 1 &&
+        r.isDir &&
+        cssX >= r.x &&
+        cssX < r.x + r.w &&
+        cssY >= r.y &&
+        cssY < r.y + r.h
+      ) {
         return r;
       }
     }
@@ -333,7 +432,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
       const id = hit?.id ?? null;
       if (id === hoverRef.current) return;
       hoverRef.current = id;
-      drawOverlay();
+      onHover(id);
 
       const seq = ++tooltipSeqRef.current;
       if (id === null || generation === 0) {
@@ -353,88 +452,42 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
         // Cosmetic, high-frequency path: a missed tooltip isn't worth a flash.
         .catch(() => {});
     },
-    [generation, hitTest, drawOverlay],
+    [generation, hitTest, onHover],
   );
 
   const handleLeave = useCallback(() => {
     hoverRef.current = null;
     tooltipSeqRef.current++;
     setTooltip(null);
-    drawOverlay();
-  }, [drawOverlay]);
-
-  const drillTo = useCallback(
-    (id: number, zoomFrom?: TreemapRect) => {
-      if (id === rootIdRef.current) return;
-      rootIdRef.current = id;
-      hitFrozenRef.current = true;
-      setTooltip(null);
-      hoverRef.current = null;
-
-      // Bitmap zoom while the new layout is fetched (drill-down only —
-      // breadcrumb zoom-out swaps instantly).
-      const base = baseRef.current;
-      const off = offscreenRef.current;
-      if (zoomFrom && base && off) {
-        const dpr = window.devicePixelRatio || 1;
-        const target = snap(zoomFrom, dpr, 0);
-        const frozen = document.createElement("canvas");
-        frozen.width = off.width;
-        frozen.height = off.height;
-        frozen.getContext("2d")!.drawImage(off, 0, 0);
-        const start = performance.now();
-        const ctx = base.getContext("2d")!;
-        const step = () => {
-          const t = Math.min(1, (performance.now() - start) / ZOOM_MS);
-          const ease = 1 - (1 - t) * (1 - t);
-          const sx = target.x * ease;
-          const sy = target.y * ease;
-          const sw = frozen.width + (target.w - frozen.width) * ease;
-          const sh = frozen.height + (target.h - frozen.height) * ease;
-          ctx.clearRect(0, 0, base.width, base.height);
-          ctx.drawImage(frozen, sx, sy, sw, sh, 0, 0, base.width, base.height);
-          if (t < 1) {
-            zoomRafRef.current = requestAnimationFrame(step);
-          } else {
-            zoomRafRef.current = 0;
-            blit();
-          }
-        };
-        cancelAnimationFrame(zoomRafRef.current);
-        zoomRafRef.current = requestAnimationFrame(step);
-      }
-
-      void fetchLayout();
-    },
-    [blit, fetchLayout],
-  );
+    onHover(null);
+  }, [onHover]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       const bounds = containerRef.current!.getBoundingClientRect();
       const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
-      if (hit) onSelect(hit.id);
+      if (hit) onSelect(hit);
     },
     [hitTest, onSelect],
   );
 
+  // Zoom into the top-level folder under the cursor — works anywhere in its
+  // region, no need to hit a (mostly covered) directory tile.
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
-      if (zoomRafRef.current !== 0) return; // still animating the last drill
+      if (zoomRafRef.current !== 0) return;
       const bounds = containerRef.current!.getBoundingClientRect();
-      const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
-      if (hit?.isDir) drillTo(hit.id, hit);
+      const region = regionAt(e.clientX - bounds.left, e.clientY - bounds.top);
+      if (region) onNavigate(region.id);
     },
-    [hitTest, drillTo],
+    [regionAt, onNavigate],
   );
 
   const zoomOut = useCallback(() => {
     if (crumbs.length < 2 || hitFrozenRef.current) return;
-    drillTo(crumbs[crumbs.length - 2].id);
-  }, [crumbs, drillTo]);
+    onNavigate(crumbs[crumbs.length - 2].id);
+  }, [crumbs, onNavigate]);
 
-  // Wheel down = up one level; wheel up = into the top-level directory
-  // under the cursor. Drilling freezes hits, which also throttles the wheel.
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (e.deltaY > 0) {
@@ -442,24 +495,10 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
         return;
       }
       const bounds = containerRef.current!.getBoundingClientRect();
-      const x = e.clientX - bounds.left;
-      const y = e.clientY - bounds.top;
-      if (hitFrozenRef.current) return;
-      for (const r of rectsRef.current) {
-        if (
-          r.depth === 1 &&
-          r.isDir &&
-          x >= r.x &&
-          x < r.x + r.w &&
-          y >= r.y &&
-          y < r.y + r.h
-        ) {
-          drillTo(r.id, r);
-          return;
-        }
-      }
+      const region = regionAt(e.clientX - bounds.left, e.clientY - bounds.top);
+      if (region) onNavigate(region.id);
     },
-    [zoomOut, drillTo],
+    [zoomOut, regionAt, onNavigate],
   );
 
   useEffect(() => {
@@ -490,7 +529,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
                     ? "text-zinc-200"
                     : "text-zinc-500 hover:text-zinc-200"
                 }`}
-                onClick={() => drillTo(c.id)}
+                onClick={() => onNavigate(c.id)}
                 title={c.name}
               >
                 {c.name}
@@ -512,7 +551,9 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
         <canvas ref={overlayRef} className="absolute inset-0 h-full w-full" />
         {!hasRects && (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-zinc-600">
-            {generation === 0 ? "Treemap appears here during a scan" : "Waiting for data…"}
+            {generation === 0
+              ? "Treemap appears here during a scan"
+              : "Waiting for data…"}
           </div>
         )}
         {tooltip && (

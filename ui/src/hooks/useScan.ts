@@ -190,9 +190,12 @@ export function useScan(): ScanController {
 
   const expandMany = useCallback(
     (ids: number[]) => {
-      if (ids.length === 0) return;
+      // Already-expanded dirs are kept fresh by refresh(); only fetch the
+      // newly expanded ones so selection sync doesn't refetch the world.
+      const fresh = ids.filter((id) => !expandedRef.current.has(id));
+      if (fresh.length === 0) return;
       const next = new Set(expandedRef.current);
-      for (const id of ids) next.add(id);
+      for (const id of fresh) next.add(id);
       expandedRef.current = next;
       setExpanded(next);
 
@@ -200,7 +203,7 @@ export function useScan(): ScanController {
       if (gen !== 0) {
         const s = sortRef.current;
         api
-          .getChildren(gen, ids, s.key, s.desc)
+          .getChildren(gen, fresh, s.key, s.desc)
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
