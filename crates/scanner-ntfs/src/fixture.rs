@@ -149,6 +149,21 @@ impl RecordBuilder {
         self
     }
 
+    /// Unnamed non-resident $DATA with a caller-supplied run list — the
+    /// record-0 ($MFT self-description) shape.
+    pub fn data_nonresident_with_runs(mut self, real: u64, highest_vcn: u64, runs: &[u8]) -> Self {
+        let mut a = nonres_attr(0x80, 0, "", 0, real, real, 0, None);
+        a[24..32].copy_from_slice(&highest_vcn.to_le_bytes());
+        let run_off = u16::from_le_bytes([a[32], a[33]]) as usize;
+        a.truncate(run_off);
+        a.extend_from_slice(runs);
+        let total = align8(a.len());
+        a.resize(total, 0);
+        a[4..8].copy_from_slice(&(total as u32).to_le_bytes());
+        self.attrs.push(a);
+        self
+    }
+
     /// A named stream (ADS), non-resident.
     pub fn named_data_nonresident(mut self, stream: &str, real: u64, alloc: u64) -> Self {
         self.attrs

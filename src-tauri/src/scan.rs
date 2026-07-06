@@ -141,7 +141,7 @@ pub fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String) -> R
     }
 
     let generation = state.last_generation.fetch_add(1, Ordering::Relaxed) + 1;
-    let handle = GenericScanner.scan(ScanOptions::new(PathBuf::from(trimmed)));
+    let handle = spawn_backend(PathBuf::from(trimmed));
     let session = Arc::new(Session {
         generation,
         started: Instant::now(),
@@ -166,6 +166,17 @@ pub fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String) -> R
         .spawn(move || drain(app, session))
         .map_err(|e| e.to_string())?;
     Ok(generation)
+}
+
+/// Backend selection, invisible to the UI: NTFS volume + elevation → raw
+/// MFT reader; anything else (FAT/exFAT/ReFS/network, non-elevated,
+/// unsupported geometry) → generic walker, silently.
+fn spawn_backend(root: PathBuf) -> ScanHandle {
+    #[cfg(all(windows, feature = "mft-backend"))]
+    if let Some(mft) = mathom_scanner_ntfs::MftScanner::probe(&root) {
+        return mft.scan(ScanOptions::new(root));
+    }
+    GenericScanner.scan(ScanOptions::new(root))
 }
 
 #[tauri::command]

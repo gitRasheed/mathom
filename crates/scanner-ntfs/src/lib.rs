@@ -13,6 +13,14 @@ pub mod pipeline;
 pub mod record;
 pub mod runs;
 
+#[cfg(all(windows, feature = "mft-backend"))]
+mod scanner;
+#[cfg(all(windows, feature = "mft-backend"))]
+mod volume;
+
+#[cfg(all(windows, feature = "mft-backend"))]
+pub use scanner::MftScanner;
+
 /// Parse-boundary failure: a static reason, no allocation. A corrupt or
 /// hostile byte stream must produce one of these — never a panic or an
 /// out-of-bounds read.

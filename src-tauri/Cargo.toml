@@ -3,6 +3,12 @@ name = "mathom-app"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# The MFT fast path ships on by default; the app degrades to the generic
+# walker at runtime when it can't be used (non-NTFS, not elevated).
+default = ["mft-backend"]
+mft-backend = ["mathom-scanner-ntfs/mft-backend"]
+
 [dependencies]
 mathom-core = { version = "0.1.0", path = "../crates/core" }
 mathom-scanner = { version = "0.1.0", path = "../crates/scanner" }

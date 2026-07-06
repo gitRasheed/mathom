@@ -124,6 +124,68 @@ pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordF
     Ok(Some(facts))
 }
 
+/// The $MFT's self-description, from FILE record 0: how many bytes of
+/// records exist and where they live on disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MftSelf {
+    /// $DATA real size — the read limit (records beyond it don't exist).
+    pub data_size: u64,
+    pub extents: Vec<crate::runs::Extent>,
+}
+
+/// Parses FILE record 0 for the $MFT's own unnamed $DATA runs. Errors if
+/// the runs in record 0 don't cover the whole attribute (a heavily
+/// fragmented $MFT spills runs into extension records — the caller falls
+/// back to FSCTL retrieval pointers rather than parsing $ATTRIBUTE_LIST).
+pub fn parse_record0(rec: &mut [u8]) -> Result<MftSelf, ParseError> {
+    if &rec[0..4] != b"FILE" || u16_at(rec, 0x16) & 0x1 == 0 {
+        return Err(ParseError("record 0 is not a live FILE record"));
+    }
+    apply_fixups(rec)?;
+
+    let first_attr = u16_at(rec, 0x14) as usize;
+    let limit = (u32_at(rec, 0x18) as usize).min(rec.len());
+    if first_attr < 0x30 || first_attr + 4 > limit {
+        return Err(ParseError("record 0 attribute offset out of bounds"));
+    }
+    let mut pos = first_attr;
+    loop {
+        if pos + 4 > limit {
+            return Err(ParseError("record 0 walk past record end"));
+        }
+        if u32_at(rec, pos) == ATTR_END {
+            return Err(ParseError("record 0 has no non-resident $DATA"));
+        }
+        if pos + 8 > limit {
+            return Err(ParseError("record 0 attribute truncated"));
+        }
+        let alen = u32_at(rec, pos + 4) as usize;
+        if alen < 24 || !alen.is_multiple_of(8) || pos + alen > limit {
+            return Err(ParseError("record 0 attribute length out of bounds"));
+        }
+        let attr = &rec[pos..pos + alen];
+        pos += alen;
+        if u32_at(attr, 0) != ATTR_DATA || attr[8] == 0 || attr[9] != 0 {
+            continue; // not the unnamed non-resident $DATA
+        }
+        if attr.len() < 64 || u64_at(attr, 16) != 0 {
+            return Err(ParseError("record 0 $DATA shape unexpected"));
+        }
+        let highest_vcn = u64_at(attr, 24);
+        let data_size = u64_at(attr, 48);
+        let run_off = u16_at(attr, 32) as usize;
+        if run_off < 64 || run_off >= attr.len() {
+            return Err(ParseError("record 0 run list out of bounds"));
+        }
+        let extents = crate::runs::decode_runs(&attr[run_off..])?;
+        let covered: u64 = extents.iter().map(|e| e.clusters).sum();
+        if covered != highest_vcn + 1 {
+            return Err(ParseError("$MFT runs incomplete in record 0"));
+        }
+        return Ok(MftSelf { data_size, extents });
+    }
+}
+
 /// Maps a reparse tag to entry flags: name surrogates (junctions, symlinks)
 /// are marked and never descended; WOF-backed files are compressed; cloud
 /// placeholders (OneDrive & co) are flagged so dehydrated sizes read right.
@@ -648,6 +710,46 @@ mod tests {
             buf[0x16] |= 0x1;
             let _ = parse_record(&mut buf, &mut arena); // any Ok/Err, no panic
         }
+    }
+
+    #[test]
+    fn record0_yields_mft_extents_and_size() {
+        // Two runs: 0x100 clusters at LCN 0x400, then 0x80 at LCN 0x300.
+        let runs = [0x22, 0x00, 0x01, 0x00, 0x04, 0x21, 0x80, 0x00, 0xFF, 0x00];
+        let mut rec = RecordBuilder::file()
+            .std_info(0x6, FT_2020)
+            .name(5, 5, 3, "$MFT")
+            .data_nonresident_with_runs(0x180 * 4096, 0x17F, &runs)
+            .build(0, 1024);
+        let m = parse_record0(&mut rec).unwrap();
+        assert_eq!(m.data_size, 0x180 * 4096);
+        assert_eq!(m.extents.len(), 2);
+        assert_eq!(m.extents[0].lcn, 0x400);
+        assert_eq!(m.extents[0].clusters, 0x100);
+        assert_eq!(m.extents[1].lcn, 0x300);
+        assert_eq!(m.extents[1].clusters, 0x80);
+    }
+
+    #[test]
+    fn record0_with_incomplete_runs_is_an_error() {
+        // Runs cover 0x100 clusters but the VCN range claims 0x180.
+        let runs = [0x22, 0x00, 0x01, 0x00, 0x04, 0x00];
+        let mut rec = RecordBuilder::file()
+            .name(5, 5, 3, "$MFT")
+            .data_nonresident_with_runs(0x180 * 4096, 0x17F, &runs)
+            .build(0, 1024);
+        assert_eq!(
+            parse_record0(&mut rec),
+            Err(ParseError("$MFT runs incomplete in record 0"))
+        );
+    }
+
+    #[test]
+    fn record0_rejects_free_or_dataless_records() {
+        let mut free = RecordBuilder::free().build(0, 1024);
+        assert!(parse_record0(&mut free).is_err());
+        let mut no_data = RecordBuilder::file().name(5, 5, 3, "$MFT").build(0, 1024);
+        assert!(parse_record0(&mut no_data).is_err());
     }
 
     #[test]
