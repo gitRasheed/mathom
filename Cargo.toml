@@ -14,3 +14,10 @@ edition = "2024"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# `tauri dev` builds the app in dev profile; unoptimized scan code made a
+# C:\ scan take 66s vs 25s in release. Dependencies (which include the
+# workspace scanner/core crates when building mathom-app) get optimized;
+# the app's own code stays debuggable.
+[profile.dev.package."*"]
+opt-level = 2

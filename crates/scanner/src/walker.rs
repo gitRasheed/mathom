@@ -127,9 +127,14 @@ fn run_scan(options: ScanOptions, tx: Sender<ScanEvent>, cancel: Arc<AtomicBool>
 
     let ticker = spawn_progress_ticker(Arc::clone(&ctx));
 
-    let threads = options
-        .threads
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
+    // Directory enumeration is blocking-syscall bound, not CPU bound:
+    // oversubscribing keeps the disk queue full. Measured on a 1.9M-entry
+    // NTFS volume (16 cores, warm cache): 16 threads 21.9s, 32 18.4s,
+    // 64 18.8s, 128 17.6s.
+    let threads = options.threads.unwrap_or_else(|| {
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        (cores * 4).min(64)
+    });
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .thread_name(|i| format!("mathom-walk-{i}"))
