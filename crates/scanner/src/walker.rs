@@ -204,6 +204,9 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
             files += 1;
             bytes += size;
         }
+        if is_system(&meta) {
+            flags.insert(EntryFlags::SYSTEM);
+        }
 
         batch.push(
             &dent.file_name().to_string_lossy(),
@@ -281,6 +284,19 @@ impl Drop for TickerGuard {
             let _ = h.join();
         }
     }
+}
+
+#[cfg(windows)]
+fn is_system(meta: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
+    // Reads the attributes already fetched with the entry — no extra syscall.
+    meta.file_attributes() & FILE_ATTRIBUTE_SYSTEM != 0
+}
+
+#[cfg(not(windows))]
+fn is_system(_meta: &fs::Metadata) -> bool {
+    false
 }
 
 fn mtime_secs(meta: &fs::Metadata) -> i64 {

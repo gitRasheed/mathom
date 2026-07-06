@@ -203,6 +203,7 @@ pub fn get_children(
     ids: Vec<NodeId>,
     sort_by: String,
     descending: bool,
+    hide_system: bool,
 ) -> Result<Vec<DirListing>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -215,6 +216,7 @@ pub fn get_children(
         let parent_size = tree.node(id).size;
         let mut rows: Vec<Row> = tree
             .children(id)
+            .filter(|&c| !hide_system || !tree.node(c).flags.contains(EntryFlags::SYSTEM))
             .map(|c| make_row(tree, c, parent_size))
             .collect();
         sort_rows(&mut rows, &sort_by, descending);
@@ -264,6 +266,7 @@ pub fn get_treemap(
     root_id: NodeId,
     width: f32,
     height: f32,
+    hide_system: bool,
 ) -> Result<Vec<TreemapRectDto>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -272,6 +275,7 @@ pub fn get_treemap(
         min_area_px: 3.0,
         padding_px: 1.0,
         max_depth: 24,
+        hide_system,
     };
     let rects = treemap::layout(
         tree,

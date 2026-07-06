@@ -19,6 +19,10 @@ impl EntryFlags {
     pub const PLACEHOLDER: EntryFlags = EntryFlags(1 << 5);
     /// One of several hardlinks to the same file record (MFT backend only).
     pub const HARDLINK: EntryFlags = EntryFlags(1 << 6);
+    /// Has the OS "system" attribute (Windows FILE_ATTRIBUTE_SYSTEM): pagefile,
+    /// hiberfil, System Volume Information, $Recycle.Bin, ... Hidden by the
+    /// "hide system files" view filter. Never set on non-Windows.
+    pub const SYSTEM: EntryFlags = EntryFlags(1 << 7);
 
     pub fn contains(self, other: EntryFlags) -> bool {
         self.0 & other.0 == other.0

@@ -95,6 +95,8 @@ export interface TreemapProps {
   rootId: number;
   /** Bumped by App on an out-of-band tree change (a delete) to force relayout. */
   revision: number;
+  /** Hide OS/system entries; forwarded to the layout query. */
+  hideSystem: boolean;
   selected: number | null;
   /** Node hovered in the tree pane — outlined here when visible. */
   hoveredId: number | null;
@@ -111,6 +113,7 @@ export function Treemap({
   generation,
   rootId,
   revision,
+  hideSystem,
   selected,
   hoveredId,
   onSelect,
@@ -147,6 +150,8 @@ export function Treemap({
   selectedRef.current = selected;
   const hoveredIdRef = useRef(hoveredId);
   hoveredIdRef.current = hoveredId;
+  const hideSystemRef = useRef(hideSystem);
+  hideSystemRef.current = hideSystem;
 
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -276,7 +281,7 @@ export function Treemap({
     const forRoot = rootIdRef.current;
     lastFetchRef.current = performance.now();
     try {
-      const rects = await api.getTreemap(generation, forRoot, w, h);
+      const rects = await api.getTreemap(generation, forRoot, w, h, hideSystemRef.current);
       if (seq !== fetchSeqRef.current || forRoot !== rootIdRef.current) return;
       rectsRef.current = rects;
       byIdRef.current = new Map(rects.map((r) => [r.id, r]));
@@ -372,6 +377,12 @@ export function Treemap({
     if (revision === 0) return;
     void fetchLayout();
   }, [revision, fetchLayout]);
+
+  // Hide-system filter toggled: relayout with the new filter. (At mount
+  // generation is 0 so fetchLayout no-ops; real toggles happen mid-scan.)
+  useEffect(() => {
+    void fetchLayout();
+  }, [hideSystem, fetchLayout]);
 
   // Live scan: refetch layout on ticks, throttled; always refetch on the
   // final (done/cancelled) snapshot.

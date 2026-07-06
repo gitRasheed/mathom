@@ -245,8 +245,10 @@ export default function App() {
         scanning={scan.scanning}
         snapshot={scan.snapshot}
         startError={scan.startError}
+        hideSystem={scan.hideSystem}
         onScan={handleScan}
         onCancel={scan.cancel}
+        onToggleHideSystem={scan.toggleHideSystem}
       />
       {scan.scanning ? <div className="scan-progress" /> : <div className="h-[2px]" />}
       {scan.rootRow ? (
@@ -280,6 +282,7 @@ export default function App() {
             generation={generation}
             rootId={viewRootId}
             revision={treeRevision}
+            hideSystem={scan.hideSystem}
             selected={selected}
             hoveredId={hoveredId}
             onSelect={handleTreemapSelect}

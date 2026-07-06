@@ -72,14 +72,33 @@ export const api = {
     ids: number[],
     sortBy: SortKey,
     descending: boolean,
+    hideSystem: boolean,
   ) =>
-    invoke<DirListing[]>("get_children", { generation, ids, sortBy, descending }),
+    invoke<DirListing[]>("get_children", {
+      generation,
+      ids,
+      sortBy,
+      descending,
+      hideSystem,
+    }),
   getNode: (generation: number, id: number) =>
     invoke<Row | null>("get_node", { generation, id }),
   getPath: (generation: number, id: number) =>
     invoke<string>("get_path", { generation, id }),
-  getTreemap: (generation: number, rootId: number, width: number, height: number) =>
-    invoke<TreemapRect[]>("get_treemap", { generation, rootId, width, height }),
+  getTreemap: (
+    generation: number,
+    rootId: number,
+    width: number,
+    height: number,
+    hideSystem: boolean,
+  ) =>
+    invoke<TreemapRect[]>("get_treemap", {
+      generation,
+      rootId,
+      width,
+      height,
+      hideSystem,
+    }),
   getAncestors: (generation: number, id: number) =>
     invoke<Crumb[]>("get_ancestors", { generation, id }),
   deleteEntry: (generation: number, id: number, permanent: boolean) =>

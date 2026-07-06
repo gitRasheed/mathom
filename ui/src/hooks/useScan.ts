@@ -28,6 +28,7 @@ export interface ScanController {
   childrenMap: ReadonlyMap<number, Row[]>;
   expanded: ReadonlySet<number>;
   sort: Sort;
+  hideSystem: boolean;
   startError: string | null;
   scanning: boolean;
   start: (path: string) => Promise<void>;
@@ -36,6 +37,7 @@ export interface ScanController {
   /** Expand every listed directory at once (treemap → tree reveal). */
   expandMany: (ids: number[]) => void;
   changeSort: (key: SortKey) => void;
+  toggleHideSystem: () => void;
   pathOf: (id: number) => Promise<string | null>;
 }
 
@@ -46,6 +48,7 @@ export function useScan(): ScanController {
   const [childrenMap, setChildrenMap] = useState<Map<number, Row[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
   const [sort, setSort] = useState<Sort>({ key: "size", desc: true });
+  const [hideSystem, setHideSystem] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
   const genRef = useRef(0);
@@ -53,6 +56,8 @@ export function useScan(): ScanController {
   expandedRef.current = expanded;
   const sortRef = useRef(sort);
   sortRef.current = sort;
+  const hideSystemRef = useRef(hideSystem);
+  hideSystemRef.current = hideSystem;
   const busyRef = useRef(false);
   const queuedRef = useRef(false);
 
@@ -80,7 +85,7 @@ export function useScan(): ScanController {
       const ids = Array.from(new Set([0, ...expandedRef.current]));
       const [root, listings] = await Promise.all([
         api.getNode(gen, 0),
-        api.getChildren(gen, ids, s.key, s.desc),
+        api.getChildren(gen, ids, s.key, s.desc, hideSystemRef.current),
       ]);
       if (genRef.current === gen) {
         setRootRow(root);
@@ -134,10 +139,10 @@ export function useScan(): ScanController {
       .catch((e) => reportUiError("checking scan status", e));
   }, [refresh]);
 
-  // Sort changed: refetch everything visible with the new order.
+  // Sort or the hide-system filter changed: refetch everything visible.
   useEffect(() => {
     void refresh();
-  }, [sort, refresh]);
+  }, [sort, hideSystem, refresh]);
 
   const start = useCallback(
     async (path: string) => {
@@ -178,7 +183,7 @@ export function useScan(): ScanController {
       if (nowExpanded && gen !== 0) {
         const s = sortRef.current;
         api
-          .getChildren(gen, [id], s.key, s.desc)
+          .getChildren(gen, [id], s.key, s.desc, hideSystemRef.current)
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
@@ -203,7 +208,7 @@ export function useScan(): ScanController {
       if (gen !== 0) {
         const s = sortRef.current;
         api
-          .getChildren(gen, fresh, s.key, s.desc)
+          .getChildren(gen, fresh, s.key, s.desc, hideSystemRef.current)
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
@@ -218,6 +223,8 @@ export function useScan(): ScanController {
       prev.key === key ? { key, desc: !prev.desc } : { key, desc: key !== "name" },
     );
   }, []);
+
+  const toggleHideSystem = useCallback(() => setHideSystem((v) => !v), []);
 
   const pathOf = useCallback(async (id: number) => {
     const gen = genRef.current;
@@ -237,6 +244,7 @@ export function useScan(): ScanController {
     childrenMap,
     expanded,
     sort,
+    hideSystem,
     startError,
     scanning: snapshot?.state === "scanning",
     start,
@@ -244,6 +252,7 @@ export function useScan(): ScanController {
     toggleExpand,
     expandMany,
     changeSort,
+    toggleHideSystem,
     pathOf,
   };
 }

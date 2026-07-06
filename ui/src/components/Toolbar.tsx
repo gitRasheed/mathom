@@ -7,16 +7,20 @@ interface ToolbarProps {
   scanning: boolean;
   snapshot: Snapshot | null;
   startError: string | null;
+  hideSystem: boolean;
   onScan: (path: string) => void;
   onCancel: () => void;
+  onToggleHideSystem: () => void;
 }
 
 export function Toolbar({
   scanning,
   snapshot,
   startError,
+  hideSystem,
   onScan,
   onCancel,
+  onToggleHideSystem,
 }: ToolbarProps) {
   const [path, setPath] = useState("");
 
@@ -76,6 +80,18 @@ export function Toolbar({
         </button>
       )}
       {startError && <span className="text-xs text-red-400">{startError}</span>}
+      <label
+        className="ml-2 flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-zinc-400"
+        title="Hide OS/system files (pagefile, hiberfil, System Volume Information, …)"
+      >
+        <input
+          type="checkbox"
+          className="accent-teal-600"
+          checked={hideSystem}
+          onChange={onToggleHideSystem}
+        />
+        Hide system files
+      </label>
       <div className="tnum ml-auto flex items-center gap-3 text-xs text-zinc-500">
         {snapshot && snapshot.state !== "idle" && (
           <>

@@ -9,6 +9,7 @@
 //! directory's color.
 
 use crate::category::categorize;
+use crate::entry::EntryFlags;
 use crate::tree::{NodeId, Tree};
 
 #[derive(Clone, Copy, Debug)]
@@ -25,6 +26,9 @@ pub struct TreemapOptions {
     pub padding_px: f32,
     /// Maximum nesting depth (root = 0).
     pub max_depth: u8,
+    /// Omit SYSTEM entries; tiles are proportioned by visible (non-system)
+    /// bytes so hidden content vanishes instead of leaving blank space.
+    pub hide_system: bool,
 }
 
 impl Default for TreemapOptions {
@@ -33,6 +37,7 @@ impl Default for TreemapOptions {
             min_area_px: 1.0,
             padding_px: 1.0,
             max_depth: 32,
+            hide_system: false,
         }
     }
 }
@@ -72,8 +77,41 @@ pub fn layout(
         w: viewport.w as f64,
         h: viewport.h as f64,
     };
-    emit(tree, root, frame, 0, opts, &mut out);
+    // When hiding system files, precompute each node's visible (non-system)
+    // subtree size so tiles are proportioned by what's actually shown.
+    let visible = opts.hide_system.then(|| {
+        let mut v = vec![0u64; tree.len()];
+        fill_visible(tree, root, &mut v);
+        v
+    });
+    emit(tree, root, frame, 0, opts, visible.as_deref(), &mut out);
     out
+}
+
+/// Bytes under `id` excluding SYSTEM subtrees. A system node contributes 0
+/// (its whole subtree is hidden); a directory is the sum of its children.
+fn fill_visible(tree: &Tree, id: NodeId, visible: &mut [u64]) -> u64 {
+    let node = tree.node(id);
+    let size = if node.flags.contains(EntryFlags::SYSTEM) {
+        0
+    } else if node.is_dir() {
+        tree.children(id)
+            .map(|c| fill_visible(tree, c, visible))
+            .sum()
+    } else {
+        node.size
+    };
+    visible[id as usize] = size;
+    size
+}
+
+/// Size used to proportion a node's tile: its precomputed visible size when
+/// hiding system files, otherwise its full aggregate.
+fn effective_size(tree: &Tree, id: NodeId, visible: Option<&[u64]>) -> u64 {
+    match visible {
+        Some(v) => v[id as usize],
+        None => tree.node(id).size,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -105,6 +143,7 @@ fn emit(
     frame: Frame,
     depth: u8,
     opts: &TreemapOptions,
+    visible: Option<&[u64]>,
     out: &mut Vec<TreemapRect>,
 ) {
     let node = tree.node(id);
@@ -125,7 +164,7 @@ fn emit(
     if inner.w <= 0.0 || inner.h <= 0.0 {
         return;
     }
-    lay_children(tree, id, inner, depth + 1, opts, out);
+    lay_children(tree, id, inner, depth + 1, opts, visible, out);
 }
 
 fn lay_children(
@@ -134,11 +173,12 @@ fn lay_children(
     frame: Frame,
     depth: u8,
     opts: &TreemapOptions,
+    visible: Option<&[u64]>,
     out: &mut Vec<TreemapRect>,
 ) {
     let mut items: Vec<(NodeId, u64)> = tree
         .children(dir)
-        .map(|c| (c, tree.node(c).size))
+        .map(|c| (c, effective_size(tree, c, visible)))
         .filter(|&(_, size)| size > 0)
         .collect();
     if items.is_empty() {
@@ -185,6 +225,7 @@ fn lay_children(
             depth,
             min_area,
             opts,
+            visible,
             out,
         );
         i = j;
@@ -210,6 +251,7 @@ fn lay_row(
     depth: u8,
     min_area: f64,
     opts: &TreemapOptions,
+    visible: Option<&[u64]>,
     out: &mut Vec<TreemapRect>,
 ) {
     let horizontal = remaining.w < remaining.h; // row spans the full width
@@ -243,7 +285,7 @@ fn lay_row(
         };
         offset += len;
         if frame.area() >= min_area {
-            emit(tree, id, frame, depth, opts, out);
+            emit(tree, id, frame, depth, opts, visible, out);
         }
     }
 
@@ -295,6 +337,7 @@ mod tests {
             min_area_px: 0.0,
             padding_px: 0.0,
             max_depth: 32,
+            hide_system: false,
         }
     }
 
@@ -427,6 +470,7 @@ mod tests {
             min_area_px: 0.0,
             padding_px: 2.0,
             max_depth: 32,
+            hide_system: false,
         };
         let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
 
@@ -446,6 +490,7 @@ mod tests {
             min_area_px: 1.0,
             padding_px: 0.0,
             max_depth: 32,
+            hide_system: false,
         };
         let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
 
@@ -482,6 +527,7 @@ mod tests {
             min_area_px: 0.0,
             padding_px: 0.0,
             max_depth: 1,
+            hide_system: false,
         };
         let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
 
@@ -509,5 +555,62 @@ mod tests {
         // f1:f2 = 3:1 of the full viewport
         assert!((area(&rect_of(&rects, 2)) - 7500.0).abs() < 1.0);
         assert!((area(&rect_of(&rects, 3)) - 2500.0).abs() < 1.0);
+    }
+
+    fn hide_system_opts() -> TreemapOptions {
+        TreemapOptions {
+            hide_system: true,
+            ..no_padding()
+        }
+    }
+
+    #[test]
+    fn hide_system_omits_system_files_and_reproportions() {
+        // root / a (non-system, 500) + sys (system, 500)
+        let mut b = EntryBatch::default();
+        b.push("root", entry(0, 0, DIR, 0));
+        b.push("a", entry(1, 0, FILE, 500));
+        b.push("sys", entry(2, 0, EntryFlags::SYSTEM, 500));
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&b);
+        let tree = builder.finish();
+
+        let vp = Viewport { w: 100.0, h: 100.0 };
+        assert!(
+            layout(&tree, 0, vp, &no_padding())
+                .iter()
+                .any(|r| r.id == 2)
+        );
+
+        let hidden = layout(&tree, 0, vp, &hide_system_opts());
+        assert!(hidden.iter().all(|r| r.id != 2), "system file hidden");
+        // "a" now fills the whole viewport instead of half.
+        assert!((area(&rect_of(&hidden, 1)) - 10_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn hide_system_hides_whole_system_subtree() {
+        // root / dir { f 500 } + sysdir(SYSTEM) { g 9999 }
+        let sys_dir = DIR.union(EntryFlags::SYSTEM);
+        let mut b = EntryBatch::default();
+        b.push("root", entry(0, 0, DIR, 0));
+        b.push("dir", entry(1, 0, DIR, 0));
+        b.push("f", entry(2, 1, FILE, 500));
+        b.push("sysdir", entry(3, 0, sys_dir, 0));
+        b.push("g", entry(4, 3, FILE, 9999));
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&b);
+        let tree = builder.finish();
+
+        let hidden = layout(
+            &tree,
+            0,
+            Viewport { w: 100.0, h: 100.0 },
+            &hide_system_opts(),
+        );
+        // The huge system subtree is gone entirely, not just visually blank.
+        assert!(hidden.iter().all(|r| r.id != 3 && r.id != 4));
+        assert!((area(&rect_of(&hidden, 1)) - 10_000.0).abs() < 1.0);
+        assert!((area(&rect_of(&hidden, 2)) - 10_000.0).abs() < 1.0);
     }
 }
