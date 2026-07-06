@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["mft-backend"]
-# Raw MFT reader. Windows-only; on other targets the crate compiles to an empty stub.
+# Off by default until milestone 5 wires the backend in — keeps mft/ntfs/
+# windows out of every build. Windows-only; elsewhere the crate is an empty
+# stub either way.
+default = []
 mft-backend = ["dep:mft", "dep:ntfs", "dep:windows"]
 
 [dependencies]
