@@ -13,6 +13,8 @@ fn main() {
             scan::get_children,
             scan::get_node,
             scan::get_path,
+            scan::get_treemap,
+            scan::get_ancestors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running mathom");

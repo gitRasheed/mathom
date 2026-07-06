@@ -1,16 +1,23 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
+import { Treemap } from "./components/Treemap";
 import { useScan } from "./hooks/useScan";
-import type { Snapshot } from "./lib/api";
+import { api, type Snapshot } from "./lib/api";
+
+const TREE_PANE_MIN = 320;
+const TREEMAP_PANE_MIN = 280;
 
 export default function App() {
   const scan = useScan();
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [revealId, setRevealId] = useState<number | null>(null);
+  const [treeWidth, setTreeWidth] = useState(560);
+  const splitRef = useRef<HTMLDivElement>(null);
 
-  const { pathOf, start } = scan;
+  const { pathOf, start, expandMany, generation } = scan;
 
   const handleSelect = useCallback(
     (id: number) => {
@@ -20,14 +27,57 @@ export default function App() {
     [pathOf],
   );
 
+  // Treemap click: select + expand the ancestor chain so the tree can scroll
+  // the node into view.
+  const handleTreemapSelect = useCallback(
+    (id: number) => {
+      handleSelect(id);
+      if (generation === 0) return;
+      api
+        .getAncestors(generation, id)
+        .then((crumbs) => {
+          expandMany(crumbs.slice(0, -1).map((c) => c.id));
+          setRevealId(id);
+        })
+        .catch(() => {});
+    },
+    [handleSelect, generation, expandMany],
+  );
+
+  const handleRevealed = useCallback(() => setRevealId(null), []);
+
   const handleScan = useCallback(
     (path: string) => {
       setSelected(null);
       setSelectedPath(null);
+      setRevealId(null);
       void start(path);
     },
     [start],
   );
+
+  const treeWidthRef = useRef(treeWidth);
+  treeWidthRef.current = treeWidth;
+
+  const startDivider = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = treeWidthRef.current;
+    const total = splitRef.current?.clientWidth ?? window.innerWidth;
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(
+        Math.max(TREE_PANE_MIN, startWidth + ev.clientX - startX),
+        total - TREEMAP_PANE_MIN,
+      );
+      setTreeWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -40,16 +90,35 @@ export default function App() {
       />
       {scan.scanning ? <div className="scan-progress" /> : <div className="h-[2px]" />}
       {scan.rootRow ? (
-        <TreeView
-          rootRow={scan.rootRow}
-          childrenMap={scan.childrenMap}
-          expanded={scan.expanded}
-          sort={scan.sort}
-          selected={selected}
-          onToggle={scan.toggleExpand}
-          onSelect={handleSelect}
-          onSort={scan.changeSort}
-        />
+        <div ref={splitRef} className="flex min-h-0 flex-1">
+          <div
+            className="flex min-h-0 flex-col"
+            style={{ width: treeWidth, minWidth: TREE_PANE_MIN }}
+          >
+            <TreeView
+              rootRow={scan.rootRow}
+              childrenMap={scan.childrenMap}
+              expanded={scan.expanded}
+              sort={scan.sort}
+              selected={selected}
+              revealId={revealId}
+              onRevealed={handleRevealed}
+              onToggle={scan.toggleExpand}
+              onSelect={handleSelect}
+              onSort={scan.changeSort}
+            />
+          </div>
+          <div
+            className="w-1 shrink-0 cursor-col-resize border-l border-zinc-800 hover:bg-teal-700/60"
+            onMouseDown={startDivider}
+          />
+          <Treemap
+            snapshot={scan.snapshot}
+            generation={generation}
+            selected={selected}
+            onSelect={handleTreemapSelect}
+          />
+        </div>
       ) : (
         <EmptyState snapshot={scan.snapshot} />
       )}
@@ -75,7 +144,7 @@ function EmptyState({ snapshot }: { snapshot: Snapshot | null }) {
         <div className="text-center">
           <p className="text-sm text-zinc-400">Choose a folder and start a scan.</p>
           <p className="mt-1 text-xs text-zinc-600">
-            The tree fills in live while the scan runs.
+            The tree and treemap fill in live while the scan runs.
           </p>
         </div>
       )}

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use mathom_core::tree::{NodeId, Tree};
-use mathom_core::{EntryFlags, TreeBuilder};
+use mathom_core::{EntryFlags, TreeBuilder, TreemapOptions, Viewport, treemap};
 use mathom_scanner::{GenericScanner, ScanEvent, ScanHandle, ScanOptions, Scanner};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -101,6 +101,26 @@ pub struct Row {
 pub struct DirListing {
     id: NodeId,
     rows: Vec<Row>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreemapRectDto {
+    id: NodeId,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    depth: u8,
+    is_dir: bool,
+    category: u8,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Crumb {
+    id: NodeId,
+    name: String,
 }
 
 #[tauri::command]
@@ -230,6 +250,71 @@ pub fn get_path(
         return Err("unknown node".into());
     }
     Ok(tree.path(id))
+}
+
+/// Squarified layout of the subtree under `root_id` for a `width`×`height`
+/// CSS-pixel canvas. Options are fixed here (QDirStat-informed 3px² cull,
+/// 1px nesting padding) until there's a reason to expose them.
+#[tauri::command]
+pub fn get_treemap(
+    state: State<'_, AppState>,
+    generation: u64,
+    root_id: NodeId,
+    width: f32,
+    height: f32,
+) -> Result<Vec<TreemapRectDto>, String> {
+    let session = session_for(&state, generation)?;
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    let opts = TreemapOptions {
+        min_area_px: 3.0,
+        padding_px: 1.0,
+        max_depth: 24,
+    };
+    let rects = treemap::layout(tree, root_id, Viewport { w: width, h: height }, &opts);
+    Ok(rects
+        .into_iter()
+        .map(|r| TreemapRectDto {
+            id: r.id,
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: r.h,
+            depth: r.depth,
+            is_dir: r.is_dir,
+            category: r.category,
+        })
+        .collect())
+}
+
+/// Root-first chain of ancestors, ending with the node itself. Powers the
+/// treemap breadcrumbs and "reveal in tree".
+#[tauri::command]
+pub fn get_ancestors(
+    state: State<'_, AppState>,
+    generation: u64,
+    id: NodeId,
+) -> Result<Vec<Crumb>, String> {
+    let session = session_for(&state, generation)?;
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    if (id as usize) >= tree.len() {
+        return Err("unknown node".into());
+    }
+    let mut chain = vec![id];
+    let mut cur = id;
+    while let Some(p) = tree.node(cur).parent() {
+        chain.push(p);
+        cur = p;
+    }
+    chain.reverse();
+    Ok(chain
+        .into_iter()
+        .map(|n| Crumb {
+            id: n,
+            name: tree.name(n).to_string(),
+        })
+        .collect())
 }
 
 fn session_for(state: &AppState, generation: u64) -> Result<Arc<Session>, String> {

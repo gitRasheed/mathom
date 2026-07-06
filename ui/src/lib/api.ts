@@ -37,6 +37,22 @@ export interface DirListing {
   rows: Row[];
 }
 
+export interface TreemapRect {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  depth: number;
+  isDir: boolean;
+  category: number;
+}
+
+export interface Crumb {
+  id: number;
+  name: string;
+}
+
 export type SortKey = "name" | "size" | "items" | "mtime";
 
 export const api = {
@@ -54,6 +70,10 @@ export const api = {
     invoke<Row | null>("get_node", { generation, id }),
   getPath: (generation: number, id: number) =>
     invoke<string>("get_path", { generation, id }),
+  getTreemap: (generation: number, rootId: number, width: number, height: number) =>
+    invoke<TreemapRect[]>("get_treemap", { generation, rootId, width, height }),
+  getAncestors: (generation: number, id: number) =>
+    invoke<Crumb[]>("get_ancestors", { generation, id }),
 };
 
 export function onScanTick(cb: (s: Snapshot) => void): Promise<UnlistenFn> {

@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { List, type RowComponentProps } from "react-window";
+import { useEffect, useMemo } from "react";
+import { List, useListRef, type RowComponentProps } from "react-window";
 import type { Row, SortKey } from "../lib/api";
 import type { Sort } from "../hooks/useScan";
 import {
@@ -116,17 +116,22 @@ function TreeRow({
       <div className="tnum pr-3 text-right text-zinc-300">
         {formatBytes(row.size)}
       </div>
-      <div className="flex items-center gap-2 pr-3">
-        <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-sm bg-zinc-800">
-          <div
-            className="h-full rounded-sm bg-teal-600/80"
-            style={{ width: `${Math.min(100, row.pct * 100)}%` }}
-          />
+      {depth === 0 ? (
+        // "% of parent" is meaningless for the scan root itself.
+        <div />
+      ) : (
+        <div className="flex items-center gap-2 pr-3">
+          <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-sm bg-zinc-800">
+            <div
+              className="h-full rounded-sm bg-teal-600/80"
+              style={{ width: `${Math.min(100, row.pct * 100)}%` }}
+            />
+          </div>
+          <span className="tnum w-11 shrink-0 text-right text-[11px] text-zinc-500">
+            {formatPercent(row.pct)}
+          </span>
         </div>
-        <span className="tnum w-11 shrink-0 text-right text-[11px] text-zinc-500">
-          {formatPercent(row.pct)}
-        </span>
-      </div>
+      )}
       <div className="tnum pr-3 text-right text-zinc-500">
         {row.isDir ? formatNumber(row.items) : ""}
       </div>
@@ -177,6 +182,9 @@ export interface TreeViewProps {
   expanded: ReadonlySet<number>;
   sort: Sort;
   selected: number | null;
+  /** Scroll this node into view once it appears in the flattened rows. */
+  revealId: number | null;
+  onRevealed: () => void;
   onToggle: (id: number) => void;
   onSelect: (id: number) => void;
   onSort: (key: SortKey) => void;
@@ -188,20 +196,34 @@ export function TreeView({
   expanded,
   sort,
   selected,
+  revealId,
+  onRevealed,
   onToggle,
   onSelect,
   onSort,
 }: TreeViewProps) {
+  const listRef = useListRef(null);
   const flat = useMemo(
     () => flatten(rootRow, childrenMap, expanded),
     [rootRow, childrenMap, expanded],
   );
+
+  useEffect(() => {
+    if (revealId === null) return;
+    const index = flat.findIndex((f) => f.row.id === revealId);
+    if (index >= 0) {
+      listRef.current?.scrollToRow({ index, align: "smart", behavior: "auto" });
+      onRevealed();
+    }
+    // else: listings are still loading; retry when `flat` changes.
+  }, [revealId, flat, listRef, onRevealed]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Header sort={sort} onSort={onSort} />
       <div className="min-h-0 flex-1">
         <List
+          listRef={listRef}
           rowComponent={TreeRow}
           rowCount={flat.length}
           rowHeight={ROW_HEIGHT}

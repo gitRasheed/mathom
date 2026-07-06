@@ -22,6 +22,7 @@ export interface Sort {
 
 export interface ScanController {
   snapshot: Snapshot | null;
+  generation: number;
   rootRow: Row | null;
   childrenMap: ReadonlyMap<number, Row[]>;
   expanded: ReadonlySet<number>;
@@ -31,12 +32,15 @@ export interface ScanController {
   start: (path: string) => Promise<void>;
   cancel: () => void;
   toggleExpand: (id: number) => void;
+  /** Expand every listed directory at once (treemap → tree reveal). */
+  expandMany: (ids: number[]) => void;
   changeSort: (key: SortKey) => void;
   pathOf: (id: number) => Promise<string | null>;
 }
 
 export function useScan(): ScanController {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [generation, setGeneration] = useState(0);
   const [rootRow, setRootRow] = useState<Row | null>(null);
   const [childrenMap, setChildrenMap] = useState<Map<number, Row[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
@@ -121,6 +125,7 @@ export function useScan(): ScanController {
       .then((s) => {
         if (s.generation > 0 && genRef.current === 0) {
           genRef.current = s.generation;
+          setGeneration(s.generation);
           setSnapshot(s);
           void refresh();
         }
@@ -139,6 +144,7 @@ export function useScan(): ScanController {
       try {
         const gen = await api.startScan(path);
         genRef.current = gen;
+        setGeneration(gen);
         setRootRow(null);
         setChildrenMap(new Map());
         setExpanded(new Set([0]));
@@ -181,6 +187,28 @@ export function useScan(): ScanController {
     [mergeListings],
   );
 
+  const expandMany = useCallback(
+    (ids: number[]) => {
+      if (ids.length === 0) return;
+      const next = new Set(expandedRef.current);
+      for (const id of ids) next.add(id);
+      expandedRef.current = next;
+      setExpanded(next);
+
+      const gen = genRef.current;
+      if (gen !== 0) {
+        const s = sortRef.current;
+        api
+          .getChildren(gen, ids, s.key, s.desc)
+          .then((listings) => {
+            if (genRef.current === gen) mergeListings(listings);
+          })
+          .catch(() => {});
+      }
+    },
+    [mergeListings],
+  );
+
   const changeSort = useCallback((key: SortKey) => {
     setSort((prev) =>
       prev.key === key ? { key, desc: !prev.desc } : { key, desc: key !== "name" },
@@ -199,6 +227,7 @@ export function useScan(): ScanController {
 
   return {
     snapshot,
+    generation,
     rootRow,
     childrenMap,
     expanded,
@@ -208,6 +237,7 @@ export function useScan(): ScanController {
     start,
     cancel,
     toggleExpand,
+    expandMany,
     changeSort,
     pathOf,
   };
