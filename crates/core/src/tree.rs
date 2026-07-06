@@ -157,9 +157,7 @@ pub struct TreeBuilder {
 
 impl TreeBuilder {
     pub fn new() -> Self {
-        TreeBuilder {
-            tree: Tree::new(),
-        }
+        TreeBuilder { tree: Tree::new() }
     }
 
     pub fn add_batch(&mut self, batch: &EntryBatch) {
@@ -278,14 +276,8 @@ mod tests {
     fn sample_batches() -> Vec<Vec<(&'static str, FileEntry)>> {
         vec![
             vec![("root", entry(0, 0, DIR, 0))],
-            vec![
-                ("a", entry(1, 0, DIR, 0)),
-                ("f3", entry(5, 0, FILE, 1)),
-            ],
-            vec![
-                ("f1", entry(2, 1, FILE, 100)),
-                ("sub", entry(3, 1, DIR, 0)),
-            ],
+            vec![("a", entry(1, 0, DIR, 0)), ("f3", entry(5, 0, FILE, 1))],
+            vec![("f1", entry(2, 1, FILE, 100)), ("sub", entry(3, 1, DIR, 0))],
             vec![("f2", entry(4, 3, FILE, 7))],
         ]
     }

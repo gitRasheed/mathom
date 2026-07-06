@@ -57,7 +57,10 @@ pub struct ScanStats {
 pub enum ScanEvent {
     Batch(EntryBatch),
     /// Directory `id` could not be read; its children will never arrive.
-    DirError { id: NodeId, message: String },
+    DirError {
+        id: NodeId,
+        message: String,
+    },
     /// Periodic (~100ms) totals for live UI.
     Progress(ScanProgress),
     /// Always the final event, even when cancelled or failed.

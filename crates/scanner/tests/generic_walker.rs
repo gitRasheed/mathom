@@ -83,7 +83,9 @@ fn generated_fixture_totals_match() {
 
     let mut rng: u64 = 0x5DEECE66D;
     let mut next = move || {
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (rng >> 33) as usize
     };
 

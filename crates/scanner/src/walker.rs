@@ -127,9 +127,9 @@ fn run_scan(options: ScanOptions, tx: Sender<ScanEvent>, cancel: Arc<AtomicBool>
 
     let ticker = spawn_progress_ticker(Arc::clone(&ctx));
 
-    let threads = options.threads.unwrap_or_else(|| {
-        std::thread::available_parallelism().map_or(4, |n| n.get())
-    });
+    let threads = options
+        .threads
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .thread_name(|i| format!("mathom-walk-{i}"))
@@ -249,14 +249,9 @@ fn spawn_progress_ticker(ctx: Arc<Ctx>) -> TickerGuard {
     let handle = std::thread::Builder::new()
         .name("mathom-progress".into())
         .spawn(move || {
-            loop {
-                match stop_rx.recv_timeout(PROGRESS_INTERVAL) {
-                    Err(RecvTimeoutError::Timeout) => {
-                        if !ctx.send(ScanEvent::Progress(ctx.progress())) {
-                            break;
-                        }
-                    }
-                    _ => break,
+            while let Err(RecvTimeoutError::Timeout) = stop_rx.recv_timeout(PROGRESS_INTERVAL) {
+                if !ctx.send(ScanEvent::Progress(ctx.progress())) {
+                    break;
                 }
             }
         })

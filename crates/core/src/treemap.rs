@@ -63,11 +63,7 @@ pub fn layout(
     opts: &TreemapOptions,
 ) -> Vec<TreemapRect> {
     let mut out = Vec::new();
-    if tree.is_empty()
-        || (root as usize) >= tree.len()
-        || viewport.w <= 0.0
-        || viewport.h <= 0.0
-    {
+    if tree.is_empty() || (root as usize) >= tree.len() || viewport.w <= 0.0 || viewport.h <= 0.0 {
         return out;
     }
     let frame = Frame {
@@ -313,12 +309,7 @@ mod tests {
     #[test]
     fn areas_are_proportional_to_sizes() {
         let tree = flat_tree(&[("a", 500), ("b", 300), ("c", 200)]);
-        let rects = layout(
-            &tree,
-            0,
-            Viewport { w: 100.0, h: 100.0 },
-            &no_padding(),
-        );
+        let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &no_padding());
 
         assert!((area(&rect_of(&rects, 1)) - 5000.0).abs() < 1.0);
         assert!((area(&rect_of(&rects, 2)) - 3000.0).abs() < 1.0);
@@ -336,12 +327,7 @@ mod tests {
             ("f", 200),
             ("g", 100),
         ]);
-        let rects = layout(
-            &tree,
-            0,
-            Viewport { w: 600.0, h: 400.0 },
-            &no_padding(),
-        );
+        let rects = layout(&tree, 0, Viewport { w: 600.0, h: 400.0 }, &no_padding());
         let leaves: Vec<_> = rects.iter().filter(|r| !r.is_dir).collect();
 
         let total: f64 = leaves.iter().map(|r| area(r)).sum();
@@ -354,10 +340,8 @@ mod tests {
         }
         for (i, a) in leaves.iter().enumerate() {
             for b in leaves.iter().skip(i + 1) {
-                let x_overlap =
-                    (a.x + a.w).min(b.x + b.w) as f64 - a.x.max(b.x) as f64;
-                let y_overlap =
-                    (a.y + a.h).min(b.y + b.h) as f64 - a.y.max(b.y) as f64;
+                let x_overlap = (a.x + a.w).min(b.x + b.w) as f64 - a.x.max(b.x) as f64;
+                let y_overlap = (a.y + a.h).min(b.y + b.h) as f64 - a.y.max(b.y) as f64;
                 assert!(
                     x_overlap <= 0.01 || y_overlap <= 0.01,
                     "rects {} and {} overlap",
@@ -384,12 +368,7 @@ mod tests {
             ("f", 2),
             ("g", 1),
         ]);
-        let rects = layout(
-            &tree,
-            0,
-            Viewport { w: 600.0, h: 400.0 },
-            &no_padding(),
-        );
+        let rects = layout(&tree, 0, Viewport { w: 600.0, h: 400.0 }, &no_padding());
 
         let mut worst = 0.0f32;
         for r in rects.iter().filter(|r| !r.is_dir) {
@@ -415,15 +394,9 @@ mod tests {
         builder.add_batch(&b);
         let tree = builder.finish();
 
-        let rects = layout(
-            &tree,
-            0,
-            Viewport { w: 200.0, h: 100.0 },
-            &no_padding(),
-        );
+        let rects = layout(&tree, 0, Viewport { w: 200.0, h: 100.0 }, &no_padding());
 
-        let pos =
-            |id: NodeId| rects.iter().position(|r| r.id == id).expect("missing");
+        let pos = |id: NodeId| rects.iter().position(|r| r.id == id).expect("missing");
         assert!(pos(0) < pos(1));
         assert!(pos(1) < pos(2));
         assert!(pos(1) < pos(3));
@@ -485,12 +458,7 @@ mod tests {
     #[test]
     fn zero_size_children_emit_nothing_and_nothing_is_nan() {
         let tree = flat_tree(&[("empty", 0), ("real", 10)]);
-        let rects = layout(
-            &tree,
-            0,
-            Viewport { w: 100.0, h: 100.0 },
-            &no_padding(),
-        );
+        let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &no_padding());
 
         assert!(rects.iter().all(|r| r.id != 1), "zero-size file skipped");
         for r in &rects {
@@ -533,12 +501,7 @@ mod tests {
         builder.add_batch(&b);
         let tree = builder.finish();
 
-        let rects = layout(
-            &tree,
-            1,
-            Viewport { w: 100.0, h: 100.0 },
-            &no_padding(),
-        );
+        let rects = layout(&tree, 1, Viewport { w: 100.0, h: 100.0 }, &no_padding());
 
         assert_eq!(rects[0].id, 1, "drill root comes first at depth 0");
         assert_eq!(rects[0].depth, 0);

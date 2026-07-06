@@ -124,11 +124,7 @@ pub struct Crumb {
 }
 
 #[tauri::command]
-pub fn start_scan(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<u64, String> {
+pub fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<u64, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("choose a folder to scan".into());
@@ -238,11 +234,7 @@ pub fn get_node(
 }
 
 #[tauri::command]
-pub fn get_path(
-    state: State<'_, AppState>,
-    generation: u64,
-    id: NodeId,
-) -> Result<String, String> {
+pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Result<String, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
@@ -271,7 +263,15 @@ pub fn get_treemap(
         padding_px: 1.0,
         max_depth: 24,
     };
-    let rects = treemap::layout(tree, root_id, Viewport { w: width, h: height }, &opts);
+    let rects = treemap::layout(
+        tree,
+        root_id,
+        Viewport {
+            w: width,
+            h: height,
+        },
+        &opts,
+    );
     Ok(rects
         .into_iter()
         .map(|r| TreemapRectDto {

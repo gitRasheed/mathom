@@ -39,25 +39,28 @@ pub fn categorize(name: &str, is_dir: bool) -> Category {
     buf.make_ascii_lowercase();
 
     match &*buf {
+        // "ts" is ambiguous (MPEG transport stream vs TypeScript); TypeScript
+        // is by far the more common meaning, so it lives in Code below.
         b"mp4" | b"mkv" | b"avi" | b"mov" | b"wmv" | b"flv" | b"webm" | b"m4v" | b"mpg"
-        | b"mpeg" | b"ts" | b"m2ts" | b"vob" => Category::Video,
+        | b"mpeg" | b"m2ts" | b"vob" => Category::Video,
         b"mp3" | b"flac" | b"wav" | b"aac" | b"ogg" | b"opus" | b"m4a" | b"wma" | b"mid"
         | b"aiff" => Category::Audio,
         b"jpg" | b"jpeg" | b"png" | b"gif" | b"bmp" | b"webp" | b"tiff" | b"tif" | b"svg"
         | b"ico" | b"heic" | b"raw" | b"cr2" | b"nef" | b"dng" | b"psd" => Category::Image,
-        b"zip" | b"rar" | b"7z" | b"tar" | b"gz" | b"bz2" | b"xz" | b"zst" | b"iso"
-        | b"cab" | b"wim" => Category::Archive,
+        b"zip" | b"rar" | b"7z" | b"tar" | b"gz" | b"bz2" | b"xz" | b"zst" | b"iso" | b"cab"
+        | b"wim" => Category::Archive,
         b"pdf" | b"doc" | b"docx" | b"xls" | b"xlsx" | b"ppt" | b"pptx" | b"txt" | b"md"
         | b"rtf" | b"odt" | b"ods" | b"epub" | b"mobi" | b"csv" => Category::Document,
         b"rs" | b"c" | b"cpp" | b"h" | b"hpp" | b"cs" | b"java" | b"py" | b"js" | b"ts"
         | b"tsx" | b"jsx" | b"go" | b"rb" | b"php" | b"html" | b"css" | b"scss" | b"json"
-        | b"xml" | b"yaml" | b"yml" | b"toml" | b"sql" | b"sh" | b"ps1" | b"bat"
-        | b"lock" => Category::Code,
+        | b"xml" | b"yaml" | b"yml" | b"toml" | b"sql" | b"sh" | b"ps1" | b"bat" | b"lock" => {
+            Category::Code
+        }
         b"exe" | b"msi" | b"com" | b"scr" | b"appx" | b"msix" | b"jar" => Category::Executable,
-        b"dll" | b"sys" | b"drv" | b"ocx" | b"cpl" | b"efi" | b"mui" | b"etl" | b"dmp"
-        | b"pdb" | b"winmd" => Category::System,
-        b"db" | b"sqlite" | b"sqlite3" | b"mdb" | b"log" | b"dat" | b"bin" | b"idx"
-        | b"bak" | b"pak" | b"vhd" | b"vhdx" | b"vmdk" | b"qcow2" => Category::Data,
+        b"dll" | b"sys" | b"drv" | b"ocx" | b"cpl" | b"efi" | b"mui" | b"etl" | b"dmp" | b"pdb"
+        | b"winmd" => Category::System,
+        b"db" | b"sqlite" | b"sqlite3" | b"mdb" | b"log" | b"dat" | b"bin" | b"idx" | b"bak"
+        | b"pak" | b"vhd" | b"vhdx" | b"vmdk" | b"qcow2" => Category::Data,
         _ => Category::Other,
     }
 }
@@ -77,6 +80,11 @@ mod tests {
         assert_eq!(categorize("setup.exe", false), Category::Executable);
         assert_eq!(categorize("kernel32.dll", false), Category::System);
         assert_eq!(categorize("index.db", false), Category::Data);
+    }
+
+    #[test]
+    fn ts_means_typescript_not_transport_stream() {
+        assert_eq!(categorize("main.ts", false), Category::Code);
     }
 
     #[test]
