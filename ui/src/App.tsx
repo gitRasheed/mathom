@@ -1,14 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfirmDelete, type DeleteTarget } from "./components/ConfirmDelete";
+import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
 import { Treemap } from "./components/Treemap";
 import { useScan } from "./hooks/useScan";
 import { api, type Row, type Snapshot, type TreemapRect } from "./lib/api";
-import { onUiError, reportUnlessStale } from "./lib/errors";
+import { copyText } from "./lib/clipboard";
+import { onUiError, reportUiError, reportUnlessStale } from "./lib/errors";
 
 const TREE_PANE_MIN = 320;
 const TREEMAP_PANE_MIN = 280;
+
+const targetFrom = (r: Row): DeleteTarget => ({
+  id: r.id,
+  name: r.name,
+  isDir: r.isDir,
+  size: r.size,
+  items: r.items,
+});
 
 export default function App() {
   const scan = useScan();
@@ -20,6 +31,12 @@ export default function App() {
   const [revealId, setRevealId] = useState<number | null>(null);
   const [treeWidth, setTreeWidth] = useState(560);
   const [uiError, setUiError] = useState<string | null>(null);
+  // Right-click menu + delete-confirmation state, and a counter the treemap
+  // watches so it re-lays-out after an out-of-band tree mutation (a delete).
+  const [menu, setMenu] = useState<{ x: number; y: number; target: DeleteTarget } | null>(null);
+  const [confirm, setConfirm] = useState<{ target: DeleteTarget; permanent: boolean } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [treeRevision, setTreeRevision] = useState(0);
   const splitRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -90,6 +107,83 @@ export default function App() {
 
   const handleRevealed = useCallback(() => setRevealId(null), []);
 
+  // Right-click (tree row or treemap tile): select it and open the menu.
+  const handleContextMenu = useCallback(
+    (id: number, x: number, y: number) => {
+      if (generation === 0 || id === 0) return;
+      select(id);
+      api
+        .getNode(generation, id)
+        .then((node) => {
+          if (node) setMenu({ x, y, target: targetFrom(node) });
+        })
+        .catch((e) => reportUnlessStale("opening menu", e));
+    },
+    [generation, select],
+  );
+
+  const copyPath = useCallback(
+    (id: number) => {
+      if (generation === 0) return;
+      api
+        .getPath(generation, id)
+        .then((p) => copyText(p))
+        .catch((e) => reportUnlessStale("copying path", e));
+    },
+    [generation],
+  );
+
+  const openConfirm = useCallback(
+    (id: number, permanent: boolean) => {
+      if (generation === 0 || id === 0) return;
+      api
+        .getNode(generation, id)
+        .then((node) => {
+          if (node) setConfirm({ target: targetFrom(node), permanent });
+        })
+        .catch((e) => reportUnlessStale("preparing delete", e));
+    },
+    [generation],
+  );
+
+  const performDelete = useCallback(async () => {
+    if (!confirm) return;
+    const { target, permanent } = confirm;
+    setDeleteBusy(true);
+    try {
+      const res = await api.deleteEntry(generation, target.id, permanent);
+      setConfirm(null);
+      if (selected === target.id) {
+        setSelected(null);
+        setSelectedPath(null);
+      }
+      // If the deleted folder was the treemap's view root, fall back to its
+      // parent; then force a relayout so the tile disappears everywhere.
+      if (res.parentId != null) {
+        setViewRootId((vr) => (vr === target.id ? res.parentId! : vr));
+      }
+      setTreeRevision((r) => r + 1);
+    } catch (e) {
+      reportUiError("deleting", e);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [confirm, generation, selected]);
+
+  // Delete key: recycle the selected item; Shift+Delete deletes permanently.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" || confirm) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      if (selected == null || selected === 0) return;
+      e.preventDefault();
+      openConfirm(selected, e.shiftKey);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, confirm, openConfirm]);
+
   const handleScan = useCallback(
     (path: string) => {
       setSelected(null);
@@ -97,10 +191,30 @@ export default function App() {
       setViewRootId(0);
       setHoveredId(null);
       setRevealId(null);
+      setMenu(null);
+      setConfirm(null);
       void start(path);
     },
     [start],
   );
+
+  const menuItems: MenuItem[] = menu
+    ? [
+        {
+          label: "Open in Explorer",
+          onClick: () =>
+            void api
+              .openInExplorer(generation, menu.target.id)
+              .catch((e) => reportUiError("opening in Explorer", e)),
+        },
+        { label: "Copy path", onClick: () => copyPath(menu.target.id) },
+        {
+          label: menu.target.isDir ? "Delete folder…" : "Delete file…",
+          danger: true,
+          onClick: () => setConfirm({ target: menu.target, permanent: false }),
+        },
+      ]
+    : [];
 
   const treeWidthRef = useRef(treeWidth);
   treeWidthRef.current = treeWidth;
@@ -153,6 +267,7 @@ export default function App() {
               onToggle={scan.toggleExpand}
               onSelect={handleTreeSelect}
               onHoverRow={setHoveredId}
+              onContext={handleContextMenu}
               onSort={scan.changeSort}
             />
           </div>
@@ -164,11 +279,13 @@ export default function App() {
             snapshot={scan.snapshot}
             generation={generation}
             rootId={viewRootId}
+            revision={treeRevision}
             selected={selected}
             hoveredId={hoveredId}
             onSelect={handleTreemapSelect}
             onHover={setHoveredId}
             onNavigate={handleNavigate}
+            onContext={handleContextMenu}
           />
         </div>
       ) : (
@@ -179,6 +296,29 @@ export default function App() {
         selectedPath={selectedPath}
         uiError={uiError}
       />
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {confirm && (
+        <ConfirmDelete
+          target={confirm.target}
+          generation={generation}
+          permanent={confirm.permanent}
+          busy={deleteBusy}
+          onPermanentChange={(v) =>
+            setConfirm((c) => (c ? { ...c, permanent: v } : c))
+          }
+          onCancel={() => {
+            if (!deleteBusy) setConfirm(null);
+          }}
+          onConfirm={() => void performDelete()}
+        />
+      )}
     </div>
   );
 }

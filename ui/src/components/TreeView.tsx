@@ -42,6 +42,7 @@ interface TreeRowProps {
   onToggle: (id: number) => void;
   onSelect: (row: Row) => void;
   onHoverRow: (id: number | null) => void;
+  onContext: (id: number, x: number, y: number) => void;
 }
 
 function TreeRow({
@@ -54,6 +55,7 @@ function TreeRow({
   onToggle,
   onSelect,
   onHoverRow,
+  onContext,
 }: RowComponentProps<TreeRowProps>) {
   const { row, depth } = flat[index];
   const isSelected = selected === row.id;
@@ -72,6 +74,10 @@ function TreeRow({
       onClick={() => onSelect(row)}
       onDoubleClick={() => {
         if (row.isDir && row.hasChildren) onToggle(row.id);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContext(row.id, e.clientX, e.clientY);
       }}
       onMouseEnter={() => onHoverRow(row.id)}
     >
@@ -200,6 +206,7 @@ export interface TreeViewProps {
   onToggle: (id: number) => void;
   onSelect: (row: Row) => void;
   onHoverRow: (id: number | null) => void;
+  onContext: (id: number, x: number, y: number) => void;
   onSort: (key: SortKey) => void;
 }
 
@@ -215,6 +222,7 @@ export function TreeView({
   onToggle,
   onSelect,
   onHoverRow,
+  onContext,
   onSort,
 }: TreeViewProps) {
   const listRef = useListRef(null);
@@ -250,6 +258,7 @@ export function TreeView({
             onToggle,
             onSelect,
             onHoverRow,
+            onContext,
           }}
           className="h-full"
         />

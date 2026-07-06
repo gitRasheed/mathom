@@ -123,6 +123,16 @@ pub struct Crumb {
     name: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteResult {
+    removed_bytes: u64,
+    removed_files: u64,
+    removed_dirs: u64,
+    parent_id: Option<NodeId>,
+    trashed: bool,
+}
+
 #[tauri::command]
 pub fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<u64, String> {
     let trimmed = path.trim();
@@ -315,6 +325,107 @@ pub fn get_ancestors(
             name: tree.name(n).to_string(),
         })
         .collect())
+}
+
+/// Deletes a node's file/directory (Recycle Bin unless `permanent`), then
+/// subtracts its subtree from the live tree so the UI updates without a
+/// rescan. The blocking filesystem op runs with no tree lock held.
+#[tauri::command]
+pub fn delete_entry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    generation: u64,
+    id: NodeId,
+    permanent: bool,
+) -> Result<DeleteResult, String> {
+    let session = session_for(&state, generation)?;
+
+    let (path, parent_id, is_dir) = {
+        let builder = session.builder.read().unwrap();
+        let tree = builder.tree();
+        if (id as usize) >= tree.len() {
+            return Err("unknown item".into());
+        }
+        if id == Tree::ROOT {
+            return Err("can't delete the scan root".into());
+        }
+        let node = tree.node(id);
+        (tree.path(id), node.parent(), node.is_dir())
+    };
+
+    if permanent {
+        let res = if is_dir {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        res.map_err(|e| format!("{path}: {e}"))?;
+    } else {
+        trash::delete(&path).map_err(|e| format!("{path}: {e}"))?;
+    }
+
+    // The delete succeeded on disk. Reflect it in the tree if this scan still
+    // owns it; a scan started meanwhile leaves an orphaned session we can
+    // mutate harmlessly (the new scan reads the real disk anyway).
+    let removed = session.builder.write().unwrap().remove(id);
+    if let Some(r) = removed {
+        {
+            let mut p = session.progress.lock().unwrap();
+            p.files = p.files.saturating_sub(r.files);
+            p.dirs = p.dirs.saturating_sub(r.dirs);
+            p.bytes = p.bytes.saturating_sub(r.size);
+        }
+        emit_tick(&app, &session);
+    }
+
+    Ok(DeleteResult {
+        removed_bytes: removed.map_or(0, |r| r.size),
+        removed_files: removed.map_or(0, |r| r.files),
+        removed_dirs: removed.map_or(0, |r| r.dirs),
+        parent_id,
+        trashed: !permanent,
+    })
+}
+
+/// Reveals the item in the OS file manager: folders open directly, files are
+/// selected inside their parent folder.
+#[tauri::command]
+pub fn open_in_explorer(
+    state: State<'_, AppState>,
+    generation: u64,
+    id: NodeId,
+) -> Result<(), String> {
+    let session = session_for(&state, generation)?;
+    let (path, is_dir) = {
+        let builder = session.builder.read().unwrap();
+        let tree = builder.tree();
+        if (id as usize) >= tree.len() {
+            return Err("unknown item".into());
+        }
+        (tree.path(id), tree.node(id).is_dir())
+    };
+    reveal_in_file_manager(&path, is_dir)
+}
+
+#[cfg(windows)]
+fn reveal_in_file_manager(path: &str, is_dir: bool) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    let mut cmd = Command::new("explorer");
+    if is_dir {
+        cmd.arg(path);
+    } else {
+        // explorer's /select wants path and flag as one token; quote it via
+        // raw_arg (Command's normal escaping confuses explorer's own parser).
+        cmd.raw_arg(format!("/select,\"{path}\""));
+    }
+    // explorer exits non-zero even on success; only a spawn failure matters.
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
+fn reveal_in_file_manager(_path: &str, _is_dir: bool) -> Result<(), String> {
+    Err("opening the file manager is only supported on Windows".into())
 }
 
 fn session_for(state: &AppState, generation: u64) -> Result<Arc<Session>, String> {

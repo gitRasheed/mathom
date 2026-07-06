@@ -9,5 +9,5 @@ pub mod treemap;
 
 pub use category::{CATEGORY_COUNT, Category, categorize};
 pub use entry::{EntryBatch, EntryFlags, FileEntry};
-pub use tree::{Node, NodeId, Tree, TreeBuilder};
+pub use tree::{Node, NodeId, Removed, Tree, TreeBuilder};
 pub use treemap::{TreemapOptions, TreemapRect, Viewport};

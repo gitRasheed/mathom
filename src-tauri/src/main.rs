@@ -15,6 +15,8 @@ fn main() {
             scan::get_path,
             scan::get_treemap,
             scan::get_ancestors,
+            scan::delete_entry,
+            scan::open_in_explorer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running mathom");

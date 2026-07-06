@@ -93,6 +93,8 @@ export interface TreemapProps {
   generation: number;
   /** View root — controlled by App, derived from the selection. */
   rootId: number;
+  /** Bumped by App on an out-of-band tree change (a delete) to force relayout. */
+  revision: number;
   selected: number | null;
   /** Node hovered in the tree pane — outlined here when visible. */
   hoveredId: number | null;
@@ -100,17 +102,21 @@ export interface TreemapProps {
   onHover: (id: number | null) => void;
   /** Request a different view root (breadcrumb, zoom in/out gestures). */
   onNavigate: (id: number) => void;
+  /** Right-click on a tile: (id, viewport clientX/clientY). */
+  onContext: (id: number, x: number, y: number) => void;
 }
 
 export function Treemap({
   snapshot,
   generation,
   rootId,
+  revision,
   selected,
   hoveredId,
   onSelect,
   onHover,
   onNavigate,
+  onContext,
 }: TreemapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
@@ -359,6 +365,14 @@ export function Treemap({
     drawOverlay();
   }, [selected, hoveredId, drawOverlay]);
 
+  // A delete (or other out-of-band tree change) bumps `revision`; relayout so
+  // the removed tile disappears. fetchLayout is identity-stable (see header),
+  // so this only fires on a real revision change, not on every render.
+  useEffect(() => {
+    if (revision === 0) return;
+    void fetchLayout();
+  }, [revision, fetchLayout]);
+
   // Live scan: refetch layout on ticks, throttled; always refetch on the
   // final (done/cancelled) snapshot.
   const prevStateRef = useRef<string | undefined>(undefined);
@@ -504,6 +518,16 @@ export function Treemap({
     [hitTest, onSelect],
   );
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const bounds = containerRef.current!.getBoundingClientRect();
+      const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
+      if (hit) onContext(hit.id, e.clientX, e.clientY);
+    },
+    [hitTest, onContext],
+  );
+
   // Zoom into the top-level folder under the cursor — works anywhere in its
   // region, no need to hit a (mostly covered) directory tile.
   const handleDoubleClick = useCallback(
@@ -578,6 +602,7 @@ export function Treemap({
         onMouseLeave={handleLeave}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
         onWheel={handleWheel}
       >
         <canvas ref={baseRef} className="absolute inset-0 h-full w-full" />

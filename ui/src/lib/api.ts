@@ -53,6 +53,14 @@ export interface Crumb {
   name: string;
 }
 
+export interface DeleteResult {
+  removedBytes: number;
+  removedFiles: number;
+  removedDirs: number;
+  parentId: number | null;
+  trashed: boolean;
+}
+
 export type SortKey = "name" | "size" | "items" | "mtime";
 
 export const api = {
@@ -74,6 +82,10 @@ export const api = {
     invoke<TreemapRect[]>("get_treemap", { generation, rootId, width, height }),
   getAncestors: (generation: number, id: number) =>
     invoke<Crumb[]>("get_ancestors", { generation, id }),
+  deleteEntry: (generation: number, id: number, permanent: boolean) =>
+    invoke<DeleteResult>("delete_entry", { generation, id, permanent }),
+  openInExplorer: (generation: number, id: number) =>
+    invoke<void>("open_in_explorer", { generation, id }),
 };
 
 export function onScanTick(cb: (s: Snapshot) => void): Promise<UnlistenFn> {

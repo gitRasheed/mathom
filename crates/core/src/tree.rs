@@ -65,6 +65,22 @@ impl Node {
     }
 }
 
+/// Totals freed by `Tree::remove_subtree`, for updating running counts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Removed {
+    pub size: u64,
+    pub allocated: u64,
+    pub files: u64,
+    pub dirs: u64,
+}
+
+impl Removed {
+    /// Arena nodes detached (files + dirs).
+    pub fn nodes(&self) -> u64 {
+        self.files + self.dirs
+    }
+}
+
 #[derive(Default)]
 pub struct Tree {
     nodes: Vec<Node>,
@@ -124,6 +140,85 @@ impl Tree {
 
     pub fn name_bytes_used(&self) -> usize {
         self.names.bytes_used()
+    }
+
+    /// Removes the subtree rooted at `id`: unlinks it from its parent, subtracts
+    /// its aggregates from every ancestor, and vacates its arena slots. Mirrors
+    /// a filesystem delete so the tree stays consistent without a rescan.
+    ///
+    /// Returns the freed totals, or `None` if `id` is out of range, the root,
+    /// or already detached. Interned names are not reclaimed (append-only
+    /// buffer); a handful of leaked names per delete is negligible.
+    pub fn remove_subtree(&mut self, id: NodeId) -> Option<Removed> {
+        let idx = id as usize;
+        if idx >= self.nodes.len() {
+            return None;
+        }
+        let parent = self.nodes[idx].parent;
+        // Root and already-detached nodes both have parent == NONE.
+        if parent == NONE {
+            return None;
+        }
+
+        // Unlink `id` from the parent's singly-linked child list. Capture the
+        // successor before detach_subtree vacates the node.
+        let next = self.nodes[idx].next_sibling;
+        if self.nodes[parent as usize].first_child == id {
+            self.nodes[parent as usize].first_child = next;
+        } else {
+            let mut prev = self.nodes[parent as usize].first_child;
+            while prev != NONE {
+                let sib = self.nodes[prev as usize].next_sibling;
+                if sib == id {
+                    self.nodes[prev as usize].next_sibling = next;
+                    break;
+                }
+                prev = sib;
+            }
+        }
+
+        let removed = self.detach_subtree(id);
+
+        // Subtract the freed aggregates from the parent up to the root.
+        let node_count = removed.nodes() as u32;
+        let mut anc = parent;
+        loop {
+            let n = &mut self.nodes[anc as usize];
+            n.size -= removed.size;
+            n.allocated -= removed.allocated;
+            n.items -= node_count;
+            if n.parent == NONE {
+                break;
+            }
+            anc = n.parent;
+        }
+        Some(removed)
+    }
+
+    /// Walks the subtree rooted at `id`, tallying files/dirs/bytes and marking
+    /// every node vacant. Iterative (explicit stack) to bound stack depth on
+    /// deep trees. `size`/`allocated` sum leaf values only, since a directory's
+    /// aggregate is exactly the sum of its leaves.
+    fn detach_subtree(&mut self, id: NodeId) -> Removed {
+        let mut removed = Removed::default();
+        let mut stack = vec![id];
+        while let Some(cur) = stack.pop() {
+            let n = self.nodes[cur as usize];
+            let mut child = n.first_child;
+            while child != NONE {
+                stack.push(child);
+                child = self.nodes[child as usize].next_sibling;
+            }
+            if n.is_dir() {
+                removed.dirs += 1;
+            } else {
+                removed.files += 1;
+                removed.size += n.size;
+                removed.allocated += n.allocated;
+            }
+            self.nodes[cur as usize] = Node::VACANT;
+        }
+        removed
     }
 }
 
@@ -207,6 +302,12 @@ impl TreeBuilder {
         if let Some(n) = self.tree.nodes.get_mut(id as usize) {
             n.flags.insert(EntryFlags::ERROR);
         }
+    }
+
+    /// Removes a node's subtree from the live tree after a filesystem delete.
+    /// Delegates to [`Tree::remove_subtree`]; returns the freed totals.
+    pub fn remove(&mut self, id: NodeId) -> Option<Removed> {
+        self.tree.remove_subtree(id)
     }
 
     /// Live view for mid-scan snapshots.
@@ -358,5 +459,97 @@ mod tests {
     #[test]
     fn node_struct_stays_48_bytes() {
         assert_eq!(std::mem::size_of::<Node>(), 48);
+    }
+
+    fn sample_tree() -> Tree {
+        let batches = sample_batches();
+        let refs: Vec<&[(&str, FileEntry)]> = batches.iter().map(|b| b.as_slice()).collect();
+        build_sample(&refs)
+    }
+
+    fn child_ids(tree: &Tree, id: NodeId) -> Vec<NodeId> {
+        tree.children(id).collect()
+    }
+
+    #[test]
+    fn remove_subtree_frees_dir_and_updates_ancestors() {
+        let mut tree = sample_tree();
+        // Freed total equals the dir's own aggregate before removal.
+        assert_eq!(tree.node(1).size, 107);
+
+        let removed = tree.remove_subtree(1).unwrap();
+        assert_eq!(
+            removed,
+            Removed {
+                size: 107,
+                allocated: 107,
+                files: 2,
+                dirs: 2,
+            }
+        );
+        assert_eq!(removed.nodes(), 4);
+
+        // Root drops the whole subtree: 108-107 bytes, 5-4 items.
+        assert_eq!(tree.node(0).size, 1);
+        assert_eq!(tree.node(0).items, 1);
+        assert_eq!(child_ids(&tree, 0), vec![5]);
+
+        // The detached node is vacated.
+        assert!(tree.node(1).parent().is_none());
+        assert!(!tree.node(1).is_dir());
+    }
+
+    #[test]
+    fn remove_leaf_updates_ancestors_and_relinks_head() {
+        let mut tree = sample_tree();
+        // f3 is the head of root's child list; removing it relinks first_child.
+        let removed = tree.remove_subtree(5).unwrap();
+        assert_eq!(
+            removed,
+            Removed {
+                size: 1,
+                allocated: 1,
+                files: 1,
+                dirs: 0,
+            }
+        );
+        assert_eq!(tree.node(0).size, 107);
+        assert_eq!(tree.node(0).items, 4);
+        assert_eq!(child_ids(&tree, 0), vec![1]);
+    }
+
+    #[test]
+    fn remove_middle_dir_updates_every_ancestor() {
+        let mut tree = sample_tree();
+        let removed = tree.remove_subtree(3).unwrap();
+        assert_eq!(removed.nodes(), 2);
+        assert_eq!(removed.size, 7);
+
+        // Both a and root shrink; a's child list loses "sub".
+        assert_eq!(tree.node(1).size, 100);
+        assert_eq!(tree.node(1).items, 1);
+        assert_eq!(tree.node(0).size, 101);
+        assert_eq!(tree.node(0).items, 3);
+        assert_eq!(child_ids(&tree, 1), vec![2]);
+    }
+
+    #[test]
+    fn remove_rejects_root_and_unknown_ids() {
+        let mut tree = sample_tree();
+        assert_eq!(tree.remove_subtree(0), None);
+        assert_eq!(tree.remove_subtree(99), None);
+        // Nothing changed.
+        assert_eq!(tree.node(0).size, 108);
+        assert_eq!(tree.node(0).items, 5);
+    }
+
+    #[test]
+    fn remove_twice_does_not_double_subtract() {
+        let mut tree = sample_tree();
+        assert!(tree.remove_subtree(3).is_some());
+        let root_size = tree.node(0).size;
+        // The slot is now detached; a second remove is a no-op.
+        assert_eq!(tree.remove_subtree(3), None);
+        assert_eq!(tree.node(0).size, root_size);
     }
 }
