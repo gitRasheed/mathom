@@ -7,12 +7,17 @@
 //   live on a separate overlay canvas so mousemove never rebakes.
 //
 // Interaction model: the view root is CONTROLLED by App (`rootId`), which
-// derives it from the selection — selecting a folder shows that folder.
-// This component only reports intent: onSelect (tile clicked), onHover
-// (for tree-row sync), onNavigate (breadcrumb / zoom gestures). When the
-// rootId prop changes, the old bitmap zooms (drawImage source-rect
-// animation) while the new layout is fetched; hit-testing freezes until it
-// lands so clicks never act on stale geometry.
+// derives it from the selection. This component only reports intent:
+// onSelect (tile clicked), onHover (tree-row sync), onNavigate (breadcrumb
+// and zoom gestures).
+//
+// IMPORTANT invariant: every callback in the canvas pipeline (drawOverlay →
+// blit → bake → fetchLayout → drillTo) is identity-stable — props they need
+// are mirrored into refs each render. A previous version let drawOverlay
+// depend on `hoveredId`, which cascaded into the reset/resize effects and
+// made every hover wipe the canvas and refetch the full layout (IPC flood,
+// webview crashes). Effects below must only depend on values whose change
+// genuinely requires that effect.
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -41,6 +46,7 @@ const PALETTE: readonly string[] = [
 
 const SCAN_REFRESH_MS = 400;
 const ZOOM_MS = 220;
+const TOOLTIP_DELAY_MS = 120;
 
 let highlightSprite: HTMLCanvasElement | null = null;
 
@@ -124,8 +130,17 @@ export function Treemap({
   const lastFetchRef = useRef(0);
   const fetchSeqRef = useRef(0);
   const zoomRafRef = useRef(0);
-  const hoverRef = useRef<number | null>(null);
+  const mouseOverRef = useRef<number | null>(null);
   const tooltipSeqRef = useRef(0);
+  const tooltipTimerRef = useRef(0);
+
+  // Prop mirrors so the pipeline callbacks stay identity-stable.
+  const generationRef = useRef(generation);
+  generationRef.current = generation;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const hoveredIdRef = useRef(hoveredId);
+  hoveredIdRef.current = hoveredId;
 
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -147,9 +162,11 @@ export function Treemap({
       ctx.lineWidth = width;
       ctx.strokeRect(s.x + width / 2, s.y + width / 2, s.w - width, s.h - width);
     };
-    outline(selected, "#f4f4f5", 2);
-    if (hoveredId !== selected) outline(hoveredId, "#2dd4bf", 2);
-  }, [selected, hoveredId]);
+    outline(selectedRef.current, "#f4f4f5", 2);
+    if (hoveredIdRef.current !== selectedRef.current) {
+      outline(hoveredIdRef.current, "#2dd4bf", 2);
+    }
+  }, []);
 
   const blit = useCallback(() => {
     const base = baseRef.current;
@@ -217,6 +234,7 @@ export function Treemap({
   }, [blit]);
 
   const refreshCrumbs = useCallback(() => {
+    const generation = generationRef.current;
     if (generation === 0) return;
     const forRoot = rootIdRef.current;
     api
@@ -232,10 +250,11 @@ export function Treemap({
           reportUnlessStale("loading breadcrumbs", e);
         }
       });
-  }, [generation]);
+  }, []);
 
   const fetchLayout = useCallback(async () => {
     const container = containerRef.current;
+    const generation = generationRef.current;
     if (!container || generation === 0) {
       hitFrozenRef.current = false;
       return;
@@ -263,7 +282,7 @@ export function Treemap({
       reportUnlessStale("loading treemap", e);
       if (seq === fetchSeqRef.current) hitFrozenRef.current = false;
     }
-  }, [generation, bake, refreshCrumbs]);
+  }, [bake, refreshCrumbs]);
 
   const drillTo = useCallback(
     (id: number) => {
@@ -272,7 +291,7 @@ export function Treemap({
       rootIdRef.current = id;
       hitFrozenRef.current = true;
       setTooltip(null);
-      hoverRef.current = null;
+      mouseOverRef.current = null;
 
       // Bitmap zoom toward the target's old rect while the layout loads;
       // navigating to something not in view (breadcrumb, tree) swaps flat.
@@ -317,7 +336,8 @@ export function Treemap({
     drillTo(rootId);
   }, [rootId, drillTo]);
 
-  // New scan: reset drill state and clear the canvas.
+  // New scan: reset drill state and clear the canvas. `drillTo`/`fetchLayout`
+  // are identity-stable, so this runs only on real generation changes.
   useEffect(() => {
     rootIdRef.current = 0;
     rectsRef.current = [];
@@ -325,7 +345,7 @@ export function Treemap({
     setHasRects(false);
     setCrumbs([]);
     setTooltip(null);
-    hoverRef.current = null;
+    mouseOverRef.current = null;
     hitFrozenRef.current = false;
     crumbsRootRef.current = null;
     offscreenRef.current = null;
@@ -333,6 +353,11 @@ export function Treemap({
     if (base) base.getContext("2d")!.clearRect(0, 0, base.width, base.height);
     if (generation !== 0) void fetchLayout();
   }, [generation, fetchLayout]);
+
+  // Selection / cross-pane hover changed: redraw the two outlines, nothing else.
+  useEffect(() => {
+    drawOverlay();
+  }, [selected, hoveredId, drawOverlay]);
 
   // Live scan: refetch layout on ticks, throttled; always refetch on the
   // final (done/cancelled) snapshot.
@@ -350,7 +375,8 @@ export function Treemap({
     }
   }, [snapshot, generation, fetchLayout]);
 
-  // Resize: match canvas backing stores to the container at device pixels.
+  // Resize: mount-once observer; re-blit the old bitmap immediately so the
+  // pane never goes blank while the relayout is fetched.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -365,6 +391,7 @@ export function Treemap({
           c.height = h;
         }
       }
+      blit();
       void fetchLayout();
     };
     applySize();
@@ -377,11 +404,7 @@ export function Treemap({
       window.clearTimeout(timer);
       ro.disconnect();
     };
-  }, [fetchLayout]);
-
-  useEffect(() => {
-    drawOverlay();
-  }, [drawOverlay]);
+  }, [blit, fetchLayout]);
 
   const hitTest = useCallback((cssX: number, cssY: number): TreemapRect | null => {
     if (hitFrozenRef.current) return null;
@@ -396,7 +419,7 @@ export function Treemap({
     return null;
   }, []);
 
-  /// The depth-1 directory under the point: the "region" zoom gestures use.
+  /// The depth-1 directory under the point: what the zoom gestures target.
   const regionAt = useCallback((cssX: number, cssY: number): TreemapRect | null => {
     if (hitFrozenRef.current) return null;
     for (const r of rectsRef.current) {
@@ -430,34 +453,44 @@ export function Treemap({
 
       const hit = hitTest(x, y);
       const id = hit?.id ?? null;
-      if (id === hoverRef.current) return;
-      hoverRef.current = id;
+      if (id === mouseOverRef.current) return;
+      mouseOverRef.current = id;
       onHover(id);
 
-      const seq = ++tooltipSeqRef.current;
-      if (id === null || generation === 0) {
+      // Tooltip content only after the cursor settles — spam-hovering must
+      // not flood IPC with getNode/getPath calls.
+      window.clearTimeout(tooltipTimerRef.current);
+      tooltipSeqRef.current++;
+      if (id === null) {
         setTooltip(null);
         return;
       }
-      Promise.all([api.getNode(generation, id), api.getPath(generation, id)])
-        .then(([node, path]: [Row | null, string]) => {
-          if (seq !== tooltipSeqRef.current || !node) return;
-          setTooltip({
-            name: node.name,
-            size: formatBytes(node.size),
-            pct: formatPercent(node.pct),
-            path,
-          });
-        })
-        // Cosmetic, high-frequency path: a missed tooltip isn't worth a flash.
-        .catch(() => {});
+      setTooltip(null);
+      const seq = tooltipSeqRef.current;
+      tooltipTimerRef.current = window.setTimeout(() => {
+        const generation = generationRef.current;
+        if (generation === 0 || seq !== tooltipSeqRef.current) return;
+        Promise.all([api.getNode(generation, id), api.getPath(generation, id)])
+          .then(([node, path]: [Row | null, string]) => {
+            if (seq !== tooltipSeqRef.current || !node) return;
+            setTooltip({
+              name: node.name,
+              size: formatBytes(node.size),
+              pct: formatPercent(node.pct),
+              path,
+            });
+          })
+          // Cosmetic path: a missed tooltip isn't worth a flash.
+          .catch(() => {});
+      }, TOOLTIP_DELAY_MS);
     },
-    [generation, hitTest, onHover],
+    [hitTest, onHover],
   );
 
   const handleLeave = useCallback(() => {
-    hoverRef.current = null;
+    mouseOverRef.current = null;
     tooltipSeqRef.current++;
+    window.clearTimeout(tooltipTimerRef.current);
     setTooltip(null);
     onHover(null);
   }, [onHover]);
