@@ -146,12 +146,14 @@ pub fn reparse_entry_flags(tag: u32) -> EntryFlags {
 }
 
 /// FILETIME (100ns ticks since 1601) → Unix seconds; 0 stays 0 ("unknown").
+/// Division truncates toward zero, matching the generic walker's pre-1970
+/// handling (and jiff's, which the oracle tests lean on).
 pub fn filetime_to_unix(ft: u64) -> i64 {
-    const EPOCH_DELTA_SECS: i64 = 11_644_473_600;
+    const EPOCH_DELTA_TICKS: i128 = 116_444_736_000_000_000;
     if ft == 0 {
         return 0;
     }
-    (ft / 10_000_000) as i64 - EPOCH_DELTA_SECS
+    ((ft as i128 - EPOCH_DELTA_TICKS) / 10_000_000) as i64
 }
 
 /// Verifies and undoes the update-sequence protection: the last word of
@@ -653,5 +655,8 @@ mod tests {
         assert_eq!(filetime_to_unix(0), 0);
         assert_eq!(filetime_to_unix(116_444_736_000_000_000), 0); // 1970-01-01
         assert_eq!(filetime_to_unix(FT_2020), UNIX_2020);
+        // Pre-1970 truncates toward zero (walker semantics).
+        assert_eq!(filetime_to_unix(116_444_735_985_000_000), -1);
+        assert_eq!(filetime_to_unix(116_444_736_015_000_000), 1);
     }
 }
