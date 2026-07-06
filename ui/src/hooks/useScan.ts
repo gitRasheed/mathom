@@ -14,6 +14,7 @@ import {
   type SortKey,
 } from "../lib/api";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { reportUiError, reportUnlessStale } from "../lib/errors";
 
 export interface Sort {
   key: SortKey;
@@ -85,8 +86,8 @@ export function useScan(): ScanController {
         setRootRow(root);
         mergeListings(listings);
       }
-    } catch {
-      // Stale generation — a newer scan owns the UI now.
+    } catch (e) {
+      reportUnlessStale("refreshing tree", e);
     } finally {
       busyRef.current = false;
       if (queuedRef.current) {
@@ -130,7 +131,7 @@ export function useScan(): ScanController {
           void refresh();
         }
       })
-      .catch(() => {});
+      .catch((e) => reportUiError("checking scan status", e));
   }, [refresh]);
 
   // Sort changed: refetch everything visible with the new order.
@@ -161,7 +162,7 @@ export function useScan(): ScanController {
   );
 
   const cancel = useCallback(() => {
-    void api.cancelScan().catch(() => {});
+    void api.cancelScan().catch((e) => reportUiError("cancelling scan", e));
   }, []);
 
   const toggleExpand = useCallback(
@@ -181,7 +182,7 @@ export function useScan(): ScanController {
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
-          .catch(() => {});
+          .catch((e) => reportUnlessStale("loading folder", e));
       }
     },
     [mergeListings],
@@ -203,7 +204,7 @@ export function useScan(): ScanController {
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
-          .catch(() => {});
+          .catch((e) => reportUnlessStale("loading folders", e));
       }
     },
     [mergeListings],
@@ -220,7 +221,8 @@ export function useScan(): ScanController {
     if (gen === 0) return null;
     try {
       return await api.getPath(gen, id);
-    } catch {
+    } catch (e) {
+      reportUnlessStale("resolving path", e);
       return null;
     }
   }, []);

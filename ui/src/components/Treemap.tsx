@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { api, type Crumb, type Row, type Snapshot, type TreemapRect } from "../lib/api";
+import { isStale, reportUnlessStale } from "../lib/errors";
 import { formatBytes, formatPercent } from "../lib/format";
 
 const PALETTE: readonly string[] = [
@@ -95,6 +96,9 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
   // Between drill start and the new layout landing, the rect list describes
   // the OLD view — clicks/hover against it would hit stale geometry.
   const hitFrozenRef = useRef(false);
+  // Root the current crumbs belong to; names are immutable, so crumbs only
+  // need refetching when the drill root changes (not on every tick).
+  const crumbsRootRef = useRef<number | null>(null);
   const lastFetchRef = useRef(0);
   const fetchSeqRef = useRef(0);
   const zoomRafRef = useRef(0);
@@ -189,6 +193,24 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     if (zoomRafRef.current === 0) blit();
   }, [blit]);
 
+  const refreshCrumbs = useCallback(() => {
+    if (generation === 0) return;
+    const rootId = rootIdRef.current;
+    api
+      .getAncestors(generation, rootId)
+      .then((crumbs) => {
+        crumbsRootRef.current = rootId;
+        setCrumbs(crumbs);
+      })
+      .catch((e) => {
+        // "unknown node" is expected while the tree is still empty at scan
+        // start; fetchLayout retries crumbs on its next success.
+        if (!isStale(e) && !String(e).includes("unknown node")) {
+          reportUnlessStale("loading breadcrumbs", e);
+        }
+      });
+  }, [generation]);
+
   const fetchLayout = useCallback(async () => {
     const container = containerRef.current;
     if (!container || generation === 0) return;
@@ -207,19 +229,12 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
       hitFrozenRef.current = false;
       setHasRects(rects.length > 0);
       bake();
-    } catch {
-      // stale generation
+      if (crumbsRootRef.current !== rootId) refreshCrumbs();
+    } catch (e) {
+      reportUnlessStale("loading treemap", e);
       if (seq === fetchSeqRef.current) hitFrozenRef.current = false;
     }
-  }, [generation, bake]);
-
-  const refreshCrumbs = useCallback(() => {
-    if (generation === 0) return;
-    api
-      .getAncestors(generation, rootIdRef.current)
-      .then(setCrumbs)
-      .catch(() => {});
-  }, [generation]);
+  }, [generation, bake, refreshCrumbs]);
 
   // New scan: reset drill state and clear the canvas.
   useEffect(() => {
@@ -231,14 +246,12 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     setTooltip(null);
     hoverRef.current = null;
     hitFrozenRef.current = false;
+    crumbsRootRef.current = null;
     offscreenRef.current = null;
     const base = baseRef.current;
     if (base) base.getContext("2d")!.clearRect(0, 0, base.width, base.height);
-    if (generation !== 0) {
-      void fetchLayout();
-      refreshCrumbs();
-    }
-  }, [generation, fetchLayout, refreshCrumbs]);
+    if (generation !== 0) void fetchLayout();
+  }, [generation, fetchLayout]);
 
   // Live scan: refetch layout on ticks, throttled; always refetch on the
   // final (done/cancelled) snapshot.
@@ -250,13 +263,11 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
     if (snapshot.state === "scanning") {
       if (performance.now() - lastFetchRef.current >= SCAN_REFRESH_MS) {
         void fetchLayout();
-        refreshCrumbs();
       }
     } else if (prev === "scanning") {
       void fetchLayout();
-      refreshCrumbs();
     }
-  }, [snapshot, generation, fetchLayout, refreshCrumbs]);
+  }, [snapshot, generation, fetchLayout]);
 
   // Resize: match canvas backing stores to the container at device pixels.
   useEffect(() => {
@@ -339,6 +350,7 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
             path,
           });
         })
+        // Cosmetic, high-frequency path: a missed tooltip isn't worth a flash.
         .catch(() => {});
     },
     [generation, hitTest, drawOverlay],
@@ -393,9 +405,8 @@ export function Treemap({ snapshot, generation, selected, onSelect }: TreemapPro
       }
 
       void fetchLayout();
-      refreshCrumbs();
     },
-    [blit, fetchLayout, refreshCrumbs],
+    [blit, fetchLayout],
   );
 
   const handleClick = useCallback(

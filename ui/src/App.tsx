@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
 import { Treemap } from "./components/Treemap";
 import { useScan } from "./hooks/useScan";
 import { api, type Snapshot } from "./lib/api";
+import { onUiError, reportUnlessStale } from "./lib/errors";
 
 const TREE_PANE_MIN = 320;
 const TREEMAP_PANE_MIN = 280;
@@ -15,7 +16,21 @@ export default function App() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [revealId, setRevealId] = useState<number | null>(null);
   const [treeWidth, setTreeWidth] = useState(560);
+  const [uiError, setUiError] = useState<string | null>(null);
   const splitRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let timer = 0;
+    const off = onUiError((msg) => {
+      setUiError(msg);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setUiError(null), 8000);
+    });
+    return () => {
+      window.clearTimeout(timer);
+      off();
+    };
+  }, []);
 
   const { pathOf, start, expandMany, generation } = scan;
 
@@ -46,7 +61,7 @@ export default function App() {
           expandMany(chain.slice(0, -1).map((c) => c.id));
           setRevealId(target.id);
         })
-        .catch(() => {});
+        .catch((e) => reportUnlessStale("revealing selection", e));
     },
     [handleSelect, generation, selected, expandMany],
   );
@@ -129,7 +144,11 @@ export default function App() {
       ) : (
         <EmptyState snapshot={scan.snapshot} />
       )}
-      <StatusBar snapshot={scan.snapshot} selectedPath={selectedPath} />
+      <StatusBar
+        snapshot={scan.snapshot}
+        selectedPath={selectedPath}
+        uiError={uiError}
+      />
     </div>
   );
 }

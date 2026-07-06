@@ -4,6 +4,7 @@ import { formatElapsed, formatNumber } from "../lib/format";
 interface StatusBarProps {
   snapshot: Snapshot | null;
   selectedPath: string | null;
+  uiError: string | null;
 }
 
 function stateLabel(snapshot: Snapshot | null): string {
@@ -21,7 +22,7 @@ function stateLabel(snapshot: Snapshot | null): string {
   }
 }
 
-export function StatusBar({ snapshot, selectedPath }: StatusBarProps) {
+export function StatusBar({ snapshot, selectedPath, uiError }: StatusBarProps) {
   const state = snapshot?.state;
   return (
     <footer className="flex h-7 items-center gap-3 border-t border-zinc-800 px-3 text-xs text-zinc-500">
@@ -36,6 +37,11 @@ export function StatusBar({ snapshot, selectedPath }: StatusBarProps) {
       >
         {stateLabel(snapshot)}
       </span>
+      {uiError && (
+        <span className="max-w-96 shrink-0 truncate text-red-400" title={uiError}>
+          {uiError}
+        </span>
+      )}
       {snapshot !== null && snapshot.errors > 0 && (
         <span className="tnum shrink-0 text-amber-500/90">
           {formatNumber(snapshot.errors)} unreadable
