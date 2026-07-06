@@ -7,9 +7,10 @@ edition = "2024"
 mathom-core = { version = "0.1.0", path = "../crates/core" }
 mathom-scanner = { version = "0.1.0", path = "../crates/scanner" }
 mathom-scanner-ntfs = { version = "0.1.0", path = "../crates/scanner-ntfs" }
-serde = "1.0.228"
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tauri = "2.11.5"
+tauri-plugin-dialog = "2"
 
 [build-dependencies]
 tauri-build = "2.6.3"
