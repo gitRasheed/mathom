@@ -193,10 +193,13 @@ export function Treemap({
   const blit = useCallback(() => {
     const base = baseRef.current;
     const off = offscreenRef.current;
-    if (!base || !off) return;
+    if (!base || !off || off.width === 0 || off.height === 0) return;
     const ctx = base.getContext("2d")!;
     ctx.clearRect(0, 0, base.width, base.height);
-    ctx.drawImage(off, 0, 0);
+    // Scaled draw: a plain copy when sizes match (the usual case), and
+    // during a pane resize it stretches the old bitmap to the new size —
+    // no crop-jump frame between the resize and the relayout landing.
+    ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, base.width, base.height);
     drawOverlay();
   }, [drawOverlay]);
 
