@@ -186,6 +186,22 @@ fn sweep(img: &[u8]) -> Table {
     sweep.finish()
 }
 
+fn without_replacement_chars(s: &str) -> impl Iterator<Item = char> + '_ {
+    s.chars().filter(|&c| c != char::REPLACEMENT_CHARACTER)
+}
+
+/// Chosen-name comparison, modulo one decode-policy difference: NTFS names
+/// are arbitrary u16 sequences, and we replace invalid UTF-16 (unpaired
+/// surrogates) with U+FFFD — matching the generic walker's
+/// `to_string_lossy` and Unicode TR36 (replace, never delete). The oracle
+/// decodes with `DecoderTrap::Ignore` (mft x30.rs), silently *dropping*
+/// bad units. Comparing with U+FFFD stripped from both sides keeps every
+/// real divergence fatal while accepting the policy gap (found by real-C:
+/// parity: a cache file whose name embeds four lone surrogates).
+fn names_match(ours: &str, oracle: &str) -> bool {
+    ours == oracle || without_replacement_chars(ours).eq(without_replacement_chars(oracle))
+}
+
 /// The parity gate: every merged fact equal, record for record, both ways.
 fn assert_parity(img: &[u8]) {
     let (expects, torn) = oracle_expectations(img);
@@ -202,7 +218,11 @@ fn assert_parity(img: &[u8]) {
         match &exp.name {
             Some((name, parent, pseq)) => {
                 assert_ne!(slot.rank, NO_NAME, "record {no}: we lost the name");
-                assert_eq!(table.name(slot), name, "record {no}: chosen name");
+                let ours_name = table.name(slot);
+                assert!(
+                    names_match(ours_name, name),
+                    "record {no}: chosen name\n  ours:   {ours_name:?}\n  oracle: {name:?}"
+                );
                 let ours = mathom_scanner_ntfs::record::RecordRef(slot.parent_ref);
                 assert_eq!(ours.number(), *parent, "record {no}: parent");
                 assert_eq!(ours.sequence(), *pseq, "record {no}: parent sequence");
@@ -352,6 +372,19 @@ fn parity_on_curated_volume() {
             (28, RecordBuilder::file().name(5, 5, 1, "日本語 🗾.txt")),
             (29, RecordBuilder::free()),
             (31, RecordBuilder::file().name(5, 5, 0, "posix-only")),
+            // Invalid UTF-16 (lone low surrogate mid-name): we emit U+FFFD,
+            // the oracle drops the unit — exercises names_match's mirror.
+            (
+                32,
+                RecordBuilder::file().name_utf16(
+                    5,
+                    5,
+                    1,
+                    &[
+                        0x62, 0x61, 0x64, 0xDC00, 0x6E, 0x61, 0x6D, 0x65, 0x2E, 0x64, 0x61, 0x74,
+                    ],
+                ),
+            ),
         ],
     );
     assert_parity(&img);
