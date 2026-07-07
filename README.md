@@ -29,6 +29,9 @@ Download the installer (MSI or setup.exe) or the portable zip from
 [Releases](../../releases). The portable build needs the WebView2 runtime,
 which ships with Windows 10/11.
 
+The installers are not code-signed (yet), so Windows SmartScreen will warn
+on first run — "More info" → "Run anyway".
+
 Reading the MFT requires administrator rights; mathom asks once at launch.
 Decline and it silently falls back to the slower folder walker — nothing
 breaks.
