@@ -289,6 +289,7 @@ export default function App() {
               childrenMap={scan.childrenMap}
               expanded={scan.expanded}
               sort={scan.sort}
+              width={treeWidth}
               selected={selected}
               hoveredId={hoveredId}
               revealId={revealId}

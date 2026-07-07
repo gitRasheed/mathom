@@ -9,8 +9,39 @@ import {
   formatPercent,
 } from "../lib/format";
 
-const GRID_COLS = "minmax(0, 1fr) 110px 150px 90px 130px";
 const ROW_HEIGHT = 28;
+
+// The name column always flexes and never drops below NAME_MIN: trailing
+// columns appear one by one (most useful first) only while the name stays
+// readable. At the 560px default pane that means no Modified column; at the
+// 320px pane minimum, name + size only.
+const NAME_MIN = 220;
+const SIZE_W = 100;
+const PCT_W = 136;
+const ITEMS_W = 84;
+const MTIME_W = 112;
+
+interface ColumnPlan {
+  template: string;
+  pct: boolean;
+  items: boolean;
+  mtime: boolean;
+}
+
+function planColumns(width: number): ColumnPlan {
+  const nameFits = (fixed: number) => width - fixed >= NAME_MIN;
+  const pct = nameFits(SIZE_W + PCT_W);
+  const items = pct && nameFits(SIZE_W + PCT_W + ITEMS_W);
+  const mtime = items && nameFits(SIZE_W + PCT_W + ITEMS_W + MTIME_W);
+  const template = [
+    "minmax(0, 1fr)",
+    `${SIZE_W}px`,
+    ...(pct ? [`${PCT_W}px`] : []),
+    ...(items ? [`${ITEMS_W}px`] : []),
+    ...(mtime ? [`${MTIME_W}px`] : []),
+  ].join(" ");
+  return { template, pct, items, mtime };
+}
 
 interface FlatRow {
   row: Row;
@@ -36,6 +67,7 @@ function flatten(
 
 interface TreeRowProps {
   flat: FlatRow[];
+  cols: ColumnPlan;
   expanded: ReadonlySet<number>;
   selected: number | null;
   hoveredId: number | null;
@@ -49,6 +81,7 @@ function TreeRow({
   index,
   style,
   flat,
+  cols,
   expanded,
   selected,
   hoveredId,
@@ -63,7 +96,7 @@ function TreeRow({
 
   return (
     <div
-      style={{ ...style, display: "grid", gridTemplateColumns: GRID_COLS }}
+      style={{ ...style, display: "grid", gridTemplateColumns: cols.template }}
       className={`items-center text-[13px] ${
         isSelected
           ? "bg-zinc-800/80"
@@ -132,33 +165,46 @@ function TreeRow({
       <div className="tnum pr-3 text-right text-zinc-300">
         {formatBytes(row.size)}
       </div>
-      {depth === 0 ? (
-        // "% of parent" is meaningless for the scan root itself.
-        <div />
-      ) : (
-        <div className="flex items-center gap-2 pr-3">
-          <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-sm bg-zinc-800">
-            <div
-              className="h-full rounded-sm bg-teal-600/80"
-              style={{ width: `${Math.min(100, row.pct * 100)}%` }}
-            />
+      {cols.pct &&
+        (depth === 0 ? (
+          // "% of parent" is meaningless for the scan root itself.
+          <div />
+        ) : (
+          <div className="flex items-center gap-2 pr-3">
+            <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-sm bg-zinc-800">
+              <div
+                className="h-full rounded-sm bg-teal-600/80"
+                style={{ width: `${Math.min(100, row.pct * 100)}%` }}
+              />
+            </div>
+            <span className="tnum w-11 shrink-0 text-right text-[11px] text-zinc-500">
+              {formatPercent(row.pct)}
+            </span>
           </div>
-          <span className="tnum w-11 shrink-0 text-right text-[11px] text-zinc-500">
-            {formatPercent(row.pct)}
-          </span>
+        ))}
+      {cols.items && (
+        <div className="tnum pr-3 text-right text-zinc-500">
+          {row.isDir ? formatNumber(row.items) : ""}
         </div>
       )}
-      <div className="tnum pr-3 text-right text-zinc-500">
-        {row.isDir ? formatNumber(row.items) : ""}
-      </div>
-      <div className="tnum pr-3 text-right text-zinc-500">
-        {formatDate(row.mtime)}
-      </div>
+      {cols.mtime && (
+        <div className="tnum pr-3 text-right text-zinc-500">
+          {formatDate(row.mtime)}
+        </div>
+      )}
     </div>
   );
 }
 
-function Header({ sort, onSort }: { sort: Sort; onSort: (k: SortKey) => void }) {
+function Header({
+  cols,
+  sort,
+  onSort,
+}: {
+  cols: ColumnPlan;
+  sort: Sort;
+  onSort: (k: SortKey) => void;
+}) {
   const arrow = (key: SortKey) =>
     sort.key === key ? (
       <span className="ml-1 text-[9px]">{sort.desc ? "▼" : "▲"}</span>
@@ -171,7 +217,7 @@ function Header({ sort, onSort }: { sort: Sort; onSort: (k: SortKey) => void }) 
   return (
     <div
       className="border-b border-zinc-800"
-      style={{ display: "grid", gridTemplateColumns: GRID_COLS }}
+      style={{ display: "grid", gridTemplateColumns: cols.template }}
     >
       <button className={cls("left")} onClick={() => onSort("name")}>
         Name{arrow("name")}
@@ -179,15 +225,21 @@ function Header({ sort, onSort }: { sort: Sort; onSort: (k: SortKey) => void }) 
       <button className={cls("right")} onClick={() => onSort("size")}>
         Size{arrow("size")}
       </button>
-      <span className="flex items-center justify-end py-1.5 pr-3 text-[11px] font-medium uppercase tracking-wide text-zinc-600">
-        % of parent
-      </span>
-      <button className={cls("right")} onClick={() => onSort("items")}>
-        Items{arrow("items")}
-      </button>
-      <button className={cls("right")} onClick={() => onSort("mtime")}>
-        Modified{arrow("mtime")}
-      </button>
+      {cols.pct && (
+        <span className="flex items-center justify-end py-1.5 pr-3 text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+          % of parent
+        </span>
+      )}
+      {cols.items && (
+        <button className={cls("right")} onClick={() => onSort("items")}>
+          Items{arrow("items")}
+        </button>
+      )}
+      {cols.mtime && (
+        <button className={cls("right")} onClick={() => onSort("mtime")}>
+          Modified{arrow("mtime")}
+        </button>
+      )}
     </div>
   );
 }
@@ -197,6 +249,8 @@ export interface TreeViewProps {
   childrenMap: ReadonlyMap<number, Row[]>;
   expanded: ReadonlySet<number>;
   sort: Sort;
+  /** Pane width in px — drives which columns fit (see planColumns). */
+  width: number;
   selected: number | null;
   /** Node hovered in the treemap — highlighted here when visible. */
   hoveredId: number | null;
@@ -215,6 +269,7 @@ export function TreeView({
   childrenMap,
   expanded,
   sort,
+  width,
   selected,
   hoveredId,
   revealId,
@@ -230,6 +285,7 @@ export function TreeView({
     () => flatten(rootRow, childrenMap, expanded),
     [rootRow, childrenMap, expanded],
   );
+  const cols = useMemo(() => planColumns(width), [width]);
 
   useEffect(() => {
     if (revealId === null) return;
@@ -243,7 +299,7 @@ export function TreeView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Header sort={sort} onSort={onSort} />
+      <Header cols={cols} sort={sort} onSort={onSort} />
       <div className="min-h-0 flex-1" onMouseLeave={() => onHoverRow(null)}>
         <List
           listRef={listRef}
@@ -252,6 +308,7 @@ export function TreeView({
           rowHeight={ROW_HEIGHT}
           rowProps={{
             flat,
+            cols,
             expanded,
             selected,
             hoveredId,
