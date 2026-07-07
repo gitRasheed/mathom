@@ -19,7 +19,14 @@
 // webview crashes). Effects below must only depend on values whose change
 // genuinely requires that effect.
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   api,
   type Crumb,
@@ -142,6 +149,7 @@ export function Treemap({
   const mouseOverRef = useRef<number | null>(null);
   const tooltipSeqRef = useRef(0);
   const tooltipTimerRef = useRef(0);
+  const lastMouseRef = useRef({ x: 0, y: 0 });
 
   // Prop mirrors so the pipeline callbacks stay identity-stable.
   const generationRef = useRef(generation);
@@ -462,19 +470,34 @@ export function Treemap({
     return null;
   }, []);
 
+  // Positions the tooltip at the last cursor position. Needed outside
+  // mousemove too: the div mounts only after the debounce + fetch, usually
+  // with the cursor already at rest — without a mount-time placement it
+  // renders at its default (0,0), the pane's top-left corner.
+  const placeTooltip = useCallback(() => {
+    const container = containerRef.current;
+    const tip = tooltipRef.current;
+    if (!container || !tip) return;
+    const bounds = container.getBoundingClientRect();
+    const { x, y } = lastMouseRef.current;
+    const tx = Math.min(x + 14, bounds.width - 260);
+    const ty = Math.min(y + 16, bounds.height - 70);
+    tip.style.transform = `translate(${Math.max(0, tx)}px, ${Math.max(0, ty)}px)`;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (tooltip) placeTooltip();
+  }, [tooltip, placeTooltip]);
+
   const handleMove = useCallback(
     (e: React.MouseEvent) => {
       const container = containerRef.current;
-      const tip = tooltipRef.current;
       if (!container) return;
       const bounds = container.getBoundingClientRect();
       const x = e.clientX - bounds.left;
       const y = e.clientY - bounds.top;
-      if (tip) {
-        const tx = Math.min(x + 14, bounds.width - 260);
-        const ty = Math.min(y + 16, bounds.height - 70);
-        tip.style.transform = `translate(${Math.max(0, tx)}px, ${Math.max(0, ty)}px)`;
-      }
+      lastMouseRef.current = { x, y };
+      placeTooltip();
 
       const hit = hitTest(x, y);
       const id = hit?.id ?? null;
@@ -509,7 +532,7 @@ export function Treemap({
           .catch(() => {});
       }, TOOLTIP_DELAY_MS);
     },
-    [hitTest, onHover],
+    [hitTest, onHover, placeTooltip],
   );
 
   const handleLeave = useCallback(() => {
