@@ -8,9 +8,11 @@ interface ToolbarProps {
   snapshot: Snapshot | null;
   startError: string | null;
   hideSystem: boolean;
+  typePanelOpen: boolean;
   onScan: (path: string) => void;
   onCancel: () => void;
   onToggleHideSystem: () => void;
+  onToggleTypePanel: () => void;
 }
 
 export function Toolbar({
@@ -18,9 +20,11 @@ export function Toolbar({
   snapshot,
   startError,
   hideSystem,
+  typePanelOpen,
   onScan,
   onCancel,
   onToggleHideSystem,
+  onToggleTypePanel,
 }: ToolbarProps) {
   const [path, setPath] = useState("");
 
@@ -92,6 +96,17 @@ export function Toolbar({
         />
         Hide system files
       </label>
+      <button
+        onClick={onToggleTypePanel}
+        title="Show or hide the file-types panel"
+        className={`ml-1 h-8 rounded-md border px-3 text-[12px] ${
+          typePanelOpen
+            ? "border-teal-800 bg-teal-950/40 text-teal-300"
+            : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+        }`}
+      >
+        File types
+      </button>
       <div className="tnum ml-auto flex items-center gap-3 text-xs text-zinc-500">
         {snapshot && snapshot.state !== "idle" && (
           <>

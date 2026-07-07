@@ -5,6 +5,7 @@ import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
 import { Treemap } from "./components/Treemap";
+import { TypePanel } from "./components/TypePanel";
 import { useScan } from "./hooks/useScan";
 import {
   api,
@@ -36,6 +37,7 @@ export default function App() {
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [revealId, setRevealId] = useState<number | null>(null);
   const [treeWidth, setTreeWidth] = useState(560);
+  const [typePanelOpen, setTypePanelOpen] = useState(true);
   const [uiError, setUiError] = useState<string | null>(null);
   // Right-click menu + delete-confirmation state, and a counter the treemap
   // watches so it re-lays-out after an out-of-band tree mutation (a delete).
@@ -110,6 +112,22 @@ export default function App() {
         .then((chain) => {
           expandMany(chain.slice(0, -1).map((c) => c.id));
           setRevealId(rect.id);
+        })
+        .catch((e) => reportUnlessStale("revealing selection", e));
+    },
+    [select, generation, expandMany],
+  );
+
+  // Type-panel file click: select + reveal in the tree, view stays put.
+  const handlePanelFileSelect = useCallback(
+    (row: Row) => {
+      select(row.id);
+      if (generation === 0) return;
+      api
+        .getAncestors(generation, row.id)
+        .then((chain) => {
+          expandMany(chain.slice(0, -1).map((c) => c.id));
+          setRevealId(row.id);
         })
         .catch((e) => reportUnlessStale("revealing selection", e));
     },
@@ -234,16 +252,20 @@ export default function App() {
 
   const treeWidthRef = useRef(treeWidth);
   treeWidthRef.current = treeWidth;
+  const typePanelOpenRef = useRef(typePanelOpen);
+  typePanelOpenRef.current = typePanelOpen;
 
   const startDivider = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = treeWidthRef.current;
     const total = splitRef.current?.clientWidth ?? window.innerWidth;
+    // 256 = the type panel's fixed width (w-64) when it's open.
+    const reserved = TREEMAP_PANE_MIN + (typePanelOpenRef.current ? 256 : 0);
     const onMove = (ev: MouseEvent) => {
       const next = Math.min(
         Math.max(TREE_PANE_MIN, startWidth + ev.clientX - startX),
-        total - TREEMAP_PANE_MIN,
+        total - reserved,
       );
       setTreeWidth(next);
     };
@@ -262,9 +284,11 @@ export default function App() {
         snapshot={scan.snapshot}
         startError={scan.startError}
         hideSystem={scan.hideSystem}
+        typePanelOpen={typePanelOpen}
         onScan={handleScan}
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
+        onToggleTypePanel={() => setTypePanelOpen((v) => !v)}
       />
       {elevation !== null && !elevation.elevated && !elevationDismissed && (
         <ElevationBanner
@@ -318,6 +342,16 @@ export default function App() {
             onNavigate={handleNavigate}
             onContext={handleContextMenu}
           />
+          {typePanelOpen && (
+            <TypePanel
+              snapshot={scan.snapshot}
+              generation={generation}
+              rootId={viewRootId}
+              revision={treeRevision}
+              hideSystem={scan.hideSystem}
+              onSelectFile={handlePanelFileSelect}
+            />
+          )}
         </div>
       ) : (
         <EmptyState snapshot={scan.snapshot} />

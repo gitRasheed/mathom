@@ -63,6 +63,24 @@ export interface DeleteResult {
 
 export type SortKey = "name" | "size" | "items" | "mtime";
 
+export interface TypeStat {
+  /** Lowercased extension; "" is the "no extension" group. */
+  ext: string;
+  /** Index into the shared category palette. */
+  category: number;
+  bytes: number;
+  files: number;
+}
+
+export interface TypePanelData {
+  types: TypeStat[];
+  otherBytes: number;
+  otherFiles: number;
+  totalBytes: number;
+  totalFiles: number;
+  topFiles: Row[];
+}
+
 export interface ElevationStatus {
   elevated: boolean;
   /** Dev builds can't usefully relaunch — the UI hides the button. */
@@ -105,6 +123,8 @@ export const api = {
       height,
       hideSystem,
     }),
+  getTypeStats: (generation: number, rootId: number, hideSystem: boolean) =>
+    invoke<TypePanelData>("get_type_stats", { generation, rootId, hideSystem }),
   getAncestors: (generation: number, id: number) =>
     invoke<Crumb[]>("get_ancestors", { generation, id }),
   deleteEntry: (generation: number, id: number, permanent: boolean) =>

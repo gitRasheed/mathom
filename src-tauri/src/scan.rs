@@ -312,6 +312,72 @@ pub fn get_treemap(
         .collect())
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeStatDto {
+    /// Lowercased extension; empty string = the "no extension" group.
+    ext: String,
+    /// Index into the shared category palette (same key as treemap tiles).
+    category: u8,
+    bytes: u64,
+    files: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypePanelData {
+    types: Vec<TypeStatDto>,
+    other_bytes: u64,
+    other_files: u64,
+    total_bytes: u64,
+    total_files: u64,
+    top_files: Vec<Row>,
+}
+
+/// Extension breakdown + largest files for the subtree under `root_id` —
+/// the detail panel's one query, scoped to the treemap's view root.
+#[tauri::command]
+pub fn get_type_stats(
+    state: State<'_, AppState>,
+    generation: u64,
+    root_id: NodeId,
+    hide_system: bool,
+) -> Result<TypePanelData, String> {
+    const TOP_TYPES: usize = 12;
+    const TOP_FILES: usize = 8;
+
+    let session = session_for(&state, generation)?;
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    if (root_id as usize) >= tree.len() {
+        return Err("unknown node".into());
+    }
+
+    let bd = mathom_core::stats::type_breakdown(tree, root_id, TOP_TYPES, hide_system);
+    let subtree_total = bd.total_bytes;
+    let top_files = mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system)
+        .into_iter()
+        .map(|id| make_row(tree, id, subtree_total))
+        .collect();
+    Ok(TypePanelData {
+        types: bd
+            .types
+            .iter()
+            .map(|t| TypeStatDto {
+                ext: t.ext.as_ref().map_or("", |k| k.as_str()).to_string(),
+                category: t.category as u8,
+                bytes: t.bytes,
+                files: t.files,
+            })
+            .collect(),
+        other_bytes: bd.other_bytes,
+        other_files: bd.other_files,
+        total_bytes: bd.total_bytes,
+        total_files: bd.total_files,
+        top_files,
+    })
+}
+
 /// Root-first chain of ancestors, ending with the node itself. Powers the
 /// treemap breadcrumbs and "reveal in tree".
 #[tauri::command]

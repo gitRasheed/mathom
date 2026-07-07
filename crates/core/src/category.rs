@@ -20,25 +20,55 @@ pub enum Category {
 
 pub const CATEGORY_COUNT: usize = 11;
 
+/// Inline lowercased extension, the grouping key for the type panel.
+/// Extensions are at most 8 bytes by the `extension_key` rule, so this is
+/// `Copy` and hashable with no allocation on the 2M-node walk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ExtKey {
+    len: u8,
+    bytes: [u8; 8],
+}
+
+impl ExtKey {
+    pub fn as_str(&self) -> &str {
+        // Bytes were sliced from a valid &str; ASCII-lowercasing keeps UTF-8.
+        std::str::from_utf8(&self.bytes[..self.len as usize]).unwrap_or("")
+    }
+}
+
+/// The extension both grouping and categorization agree on: text after the
+/// last dot, non-empty, at most 8 bytes, ASCII-lowercased. `None` means the
+/// "no extension" group (and `Other` for the treemap color).
+pub fn extension_key(name: &str) -> Option<ExtKey> {
+    let dot = name.rfind('.')?;
+    let ext = &name[dot + 1..];
+    if ext.is_empty() || ext.len() > 8 {
+        return None;
+    }
+    let mut bytes = [0u8; 8];
+    bytes[..ext.len()].copy_from_slice(ext.as_bytes());
+    bytes.make_ascii_lowercase();
+    Some(ExtKey {
+        len: ext.len() as u8,
+        bytes,
+    })
+}
+
 /// Categorize by file extension (case-insensitive). Extensions cover the
 /// bulk of bytes on real disks; everything unrecognized is `Other`.
 pub fn categorize(name: &str, is_dir: bool) -> Category {
     if is_dir {
         return Category::Directory;
     }
-    let Some(dot) = name.rfind('.') else {
-        return Category::Other;
-    };
-    let ext = &name[dot + 1..];
-    if ext.is_empty() || ext.len() > 8 {
-        return Category::Other;
+    match extension_key(name) {
+        Some(key) => categorize_ext(&key),
+        None => Category::Other,
     }
-    let mut buf = [0u8; 8];
-    let buf = &mut buf[..ext.len()];
-    buf.copy_from_slice(ext.as_bytes());
-    buf.make_ascii_lowercase();
+}
 
-    match &*buf {
+/// Category of one extension group (files only — dirs never group).
+pub fn categorize_ext(key: &ExtKey) -> Category {
+    match &key.bytes[..key.len as usize] {
         // "ts" is ambiguous (MPEG transport stream vs TypeScript); TypeScript
         // is by far the more common meaning, so it lives in Code below.
         b"mp4" | b"mkv" | b"avi" | b"mov" | b"wmv" | b"flv" | b"webm" | b"m4v" | b"mpg"

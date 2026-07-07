@@ -16,6 +16,7 @@ fn main() {
             scan::get_node,
             scan::get_path,
             scan::get_treemap,
+            scan::get_type_stats,
             scan::get_ancestors,
             scan::delete_entry,
             scan::open_in_explorer,

@@ -36,20 +36,7 @@ import {
 } from "../lib/api";
 import { isStale, reportUnlessStale } from "../lib/errors";
 import { formatBytes, formatPercent } from "../lib/format";
-
-const PALETTE: readonly string[] = [
-  "#30323a", // 0 directory plate
-  "#a855f7", // 1 video
-  "#22c55e", // 2 audio
-  "#eab308", // 3 image
-  "#f97316", // 4 archive
-  "#3b82f6", // 5 document
-  "#06b6d4", // 6 code
-  "#ec4899", // 7 executable
-  "#64748b", // 8 system
-  "#84cc16", // 9 data
-  "#71717a", // 10 other
-];
+import { PALETTE } from "../lib/palette";
 
 const SCAN_REFRESH_MS = 400;
 const ZOOM_MS = 220;

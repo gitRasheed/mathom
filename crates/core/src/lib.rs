@@ -4,6 +4,7 @@
 pub mod category;
 pub mod entry;
 pub mod interner;
+pub mod stats;
 pub mod tree;
 pub mod treemap;
 
