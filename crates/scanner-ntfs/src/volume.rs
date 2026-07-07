@@ -15,7 +15,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::{DeviceIoControl, OVERLAPPED};
 use windows::Win32::System::Ioctl::{
     FSCTL_GET_RETRIEVAL_POINTERS, GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO,
-    RETRIEVAL_POINTERS_BUFFER, STARTING_VCN_INPUT_BUFFER,
+    RETRIEVAL_POINTERS_BUFFER, RETRIEVAL_POINTERS_BUFFER_0, STARTING_VCN_INPUT_BUFFER,
 };
 use windows::core::{Owned, PCWSTR};
 
@@ -219,7 +219,9 @@ impl Volume {
         let handle = unsafe { Owned::new(handle) };
 
         let input = STARTING_VCN_INPUT_BUFFER::default();
-        let mut out = vec![0u8; 64 * 1024];
+        // u64-backed so the RETRIEVAL_POINTERS_BUFFER view below is aligned
+        // (a Vec<u8> only guarantees byte alignment — casting it would be UB).
+        let mut out = vec![0u64; 8 * 1024];
         let mut written = 0u32;
         loop {
             // SAFETY: in/out buffers valid and sized for the call.
@@ -230,7 +232,7 @@ impl Volume {
                     Some(&input as *const _ as *const _),
                     size_of::<STARTING_VCN_INPUT_BUFFER>() as u32,
                     Some(out.as_mut_ptr() as *mut _),
-                    out.len() as u32,
+                    (out.len() * size_of::<u64>()) as u32,
                     Some(&mut written),
                     None,
                 )
@@ -242,14 +244,23 @@ impl Volume {
             }
         }
 
-        // SAFETY: the kernel filled a RETRIEVAL_POINTERS_BUFFER header.
+        // SAFETY: the buffer is 8-aligned (u64-backed), zero-initialized,
+        // and at least header-sized; the field reads below are bounds-checked
+        // against `written` before anything past the header is trusted.
         let header = unsafe { &*(out.as_ptr() as *const RETRIEVAL_POINTERS_BUFFER) };
         let count = header.ExtentCount as usize;
+        let extents_off = std::mem::offset_of!(RETRIEVAL_POINTERS_BUFFER, Extents);
+        let needed = count
+            .checked_mul(size_of::<RETRIEVAL_POINTERS_BUFFER_0>())
+            .and_then(|n| n.checked_add(extents_off));
+        if needed.is_none_or(|n| n > written as usize) {
+            return Err(format!("retrieval pointers for {path}: truncated reply"));
+        }
         let mut extents = Vec::with_capacity(count);
         let mut vcn = header.StartingVcn;
         for i in 0..count {
-            // SAFETY: Extents is a flexible array; the kernel wrote `count`
-            // entries, each 16 bytes, within `written` bytes.
+            // SAFETY: `count` entries proven to lie within the kernel-written
+            // `written` bytes above.
             let e = unsafe { &*header.Extents.as_ptr().add(i) };
             let next = e.NextVcn;
             let lcn = e.Lcn;
