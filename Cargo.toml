@@ -11,9 +11,12 @@ members = [
 version = "0.1.0"
 edition = "2024"
 
+# Do NOT add panic = "abort": the scan workers' crash-safe Done contract
+# (mathom-scanner::spawn_scan_thread) depends on catch_unwind.
 [profile.release]
 lto = "thin"
 codegen-units = 1
+strip = true
 
 # `tauri dev` builds the app in dev profile; unoptimized scan code made a
 # C:\ scan take 66s vs 25s in release. Cargo's `"*"` glob deliberately

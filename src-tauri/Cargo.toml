@@ -2,6 +2,7 @@
 name = "mathom-app"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [features]
 # The MFT fast path ships on by default; the app degrades to the generic
