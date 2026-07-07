@@ -23,14 +23,7 @@ pub struct GenericScanner;
 
 impl Scanner for GenericScanner {
     fn scan(&self, options: ScanOptions) -> ScanHandle {
-        let (tx, rx) = bounded(512);
-        let cancel = Arc::new(AtomicBool::new(false));
-        let worker_cancel = Arc::clone(&cancel);
-        std::thread::Builder::new()
-            .name("mathom-scan".into())
-            .spawn(move || run_scan(options, tx, worker_cancel))
-            .expect("failed to spawn scan thread");
-        ScanHandle::new(rx, cancel)
+        crate::spawn_scan_thread("mathom-scan", options, run_scan)
     }
 }
 

@@ -43,14 +43,7 @@ impl MftScanner {
 
 impl Scanner for MftScanner {
     fn scan(&self, options: ScanOptions) -> ScanHandle {
-        let (tx, rx) = bounded(512);
-        let cancel = Arc::new(AtomicBool::new(false));
-        let worker_cancel = Arc::clone(&cancel);
-        std::thread::Builder::new()
-            .name("mathom-mft-scan".into())
-            .spawn(move || run_scan(options, tx, worker_cancel))
-            .expect("failed to spawn MFT scan thread");
-        ScanHandle::new(rx, cancel)
+        mathom_scanner::spawn_scan_thread("mathom-mft-scan", options, run_scan)
     }
 }
 
@@ -107,6 +100,11 @@ fn scan_inner(
     let mut last_tick = Instant::now();
 
     std::thread::scope(|scope| -> Result<(), String> {
+        // The closure must own its sender: if this parse loop panics, the
+        // drop unblocks the reader's `empty_rx.recv()` so the scope's
+        // implicit join can finish and the panic can propagate (otherwise
+        // the outer frame keeps `empty_tx` alive and the join deadlocks).
+        let empty_tx = empty_tx;
         let map_ref = &map;
         scope.spawn(move || read_mft(volume, map_ref, full_tx, empty_rx, cancel));
 

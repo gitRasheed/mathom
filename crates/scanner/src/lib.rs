@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender, bounded};
 use mathom_core::EntryBatch;
 use mathom_core::tree::NodeId;
 
@@ -98,4 +98,75 @@ impl Drop for ScanHandle {
 /// entry 0, then batches where every entry's parent has already been sent.
 pub trait Scanner: Send + Sync {
     fn scan(&self, options: ScanOptions) -> ScanHandle;
+}
+
+/// Spawns a scan worker thread wired to a fresh handle. Backends route
+/// their `scan()` through this so the `Done`-is-always-last contract holds
+/// for every exit: `body` must send `Done` as its final event when it
+/// returns normally, and a panicking `body` becomes a root `DirError` plus
+/// a failed `Done` instead of a channel that silently closes (the default
+/// panic hook still prints the backtrace first).
+pub fn spawn_scan_thread(
+    name: &str,
+    options: ScanOptions,
+    body: fn(ScanOptions, Sender<ScanEvent>, Arc<AtomicBool>),
+) -> ScanHandle {
+    let (tx, rx) = bounded(512);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+    let guard_cancel = Arc::clone(&cancel);
+    let guard_tx = tx.clone();
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let start = std::time::Instant::now();
+            let run = std::panic::AssertUnwindSafe(|| body(options, tx, worker_cancel));
+            if let Err(panic) = std::panic::catch_unwind(run) {
+                let message = format!("internal scan error: {}", panic_message(panic.as_ref()));
+                let _ = guard_tx.send(ScanEvent::DirError { id: 0, message });
+                let _ = guard_tx.send(ScanEvent::Done(ScanStats {
+                    errors: 1,
+                    elapsed: start.elapsed(),
+                    cancelled: guard_cancel.load(Ordering::Relaxed),
+                    ..ScanStats::default()
+                }));
+            }
+        })
+        .expect("failed to spawn scan thread");
+    ScanHandle::new(rx, cancel)
+}
+
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("scan worker panicked")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panicking_backend_still_delivers_done() {
+        fn exploding(_: ScanOptions, tx: Sender<ScanEvent>, _: Arc<AtomicBool>) {
+            let _ = tx.send(ScanEvent::Progress(ScanProgress::default()));
+            panic!("backend bug");
+        }
+        let handle = spawn_scan_thread("test-explode", ScanOptions::new("."), exploding);
+        let events: Vec<ScanEvent> = handle.events().iter().collect();
+
+        let Some(ScanEvent::Done(stats)) = events.last() else {
+            panic!("scan ended without a Done event: {events:?}");
+        };
+        assert_eq!(stats.errors, 1);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                ScanEvent::DirError { id: 0, message } if message.contains("backend bug")
+            )),
+            "the panic message should surface as a root DirError: {events:?}"
+        );
+    }
 }

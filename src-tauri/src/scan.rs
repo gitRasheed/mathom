@@ -510,6 +510,20 @@ fn drain(app: AppHandle, session: Arc<Session>) {
             last_tick = Instant::now();
         }
     }
+
+    // The scanner contract says Done is always the final event; the loop
+    // ending without one means the worker died in a way even its panic
+    // guard couldn't report. Fail the scan visibly instead of leaving the
+    // UI at "scanning" forever.
+    {
+        let mut p = session.progress.lock().unwrap();
+        p.errors += 1;
+        p.root_error = Some("the scan worker stopped without finishing".into());
+        p.finished_ms = Some(session.started.elapsed().as_millis() as u64);
+        p.state = ScanState::Failed;
+    }
+    emit_tick(&app, &session);
+    let _ = app.emit("scan://done", snapshot(&session));
 }
 
 fn emit_tick(app: &AppHandle, session: &Session) {
