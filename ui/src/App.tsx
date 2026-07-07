@@ -452,12 +452,7 @@ function ElevationBanner({
 function EmptyState({ snapshot }: { snapshot: Snapshot | null }) {
   const failed = snapshot?.state === "failed";
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
-      <div className="grid h-14 w-14 grid-cols-[1.4fr_1fr] grid-rows-[1.2fr_1fr] gap-1 opacity-80">
-        <div className="row-span-2 rounded bg-teal-600" />
-        <div className="rounded bg-teal-400" />
-        <div className="rounded bg-teal-800" />
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
       {failed ? (
         <p className="text-sm text-red-400">
           Scan failed: {snapshot?.rootError ?? "unknown error"}
@@ -465,7 +460,7 @@ function EmptyState({ snapshot }: { snapshot: Snapshot | null }) {
       ) : (
         <div className="text-center">
           <p className="text-sm text-zinc-400">Choose a folder and start a scan.</p>
-          <p className="mt-1 text-xs text-zinc-600">
+          <p className="mt-1.5 text-xs text-zinc-600">
             The tree and treemap fill in live while the scan runs.
           </p>
         </div>
