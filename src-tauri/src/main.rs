@@ -18,6 +18,7 @@ fn main() {
             scan::get_treemap,
             scan::get_type_stats,
             scan::get_ancestors,
+            scan::search,
             scan::delete_entry,
             scan::open_in_explorer,
             elevation::elevation_status,

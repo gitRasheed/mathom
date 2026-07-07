@@ -11,6 +11,7 @@ import {
   api,
   type ElevationStatus,
   type Row,
+  type SearchHit,
   type Snapshot,
   type TreemapRect,
 } from "./lib/api";
@@ -130,6 +131,29 @@ export default function App() {
           setRevealId(row.id);
         })
         .catch((e) => reportUnlessStale("revealing selection", e));
+    },
+    [select, generation, expandMany],
+  );
+
+  // Search hit: select + reveal like a tree click — a folder becomes the
+  // treemap view, a file shows its parent folder.
+  const handleSearchSelect = useCallback(
+    (hit: SearchHit) => {
+      select(hit.id);
+      if (generation === 0) return;
+      api
+        .getAncestors(generation, hit.id)
+        .then((chain) => {
+          expandMany(chain.slice(0, -1).map((c) => c.id));
+          setRevealId(hit.id);
+          if (hit.isDir) {
+            setViewRootId(hit.id);
+          } else {
+            const parent = chain[chain.length - 2];
+            if (parent) setViewRootId(parent.id);
+          }
+        })
+        .catch((e) => reportUnlessStale("revealing search result", e));
     },
     [select, generation, expandMany],
   );
@@ -282,6 +306,7 @@ export default function App() {
       <Toolbar
         scanning={scan.scanning}
         snapshot={scan.snapshot}
+        generation={generation}
         startError={scan.startError}
         hideSystem={scan.hideSystem}
         typePanelOpen={typePanelOpen}
@@ -289,6 +314,7 @@ export default function App() {
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
         onToggleTypePanel={() => setTypePanelOpen((v) => !v)}
+        onSearchSelect={handleSearchSelect}
       />
       {elevation !== null && !elevation.elevated && !elevationDismissed && (
         <ElevationBanner

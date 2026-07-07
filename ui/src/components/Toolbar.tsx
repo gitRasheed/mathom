@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Snapshot } from "../lib/api";
+import type { SearchHit, Snapshot } from "../lib/api";
 import { formatBytes, formatElapsed, formatNumber } from "../lib/format";
+import { SearchBox } from "./SearchBox";
 
 interface ToolbarProps {
   scanning: boolean;
   snapshot: Snapshot | null;
+  generation: number;
   startError: string | null;
   hideSystem: boolean;
   typePanelOpen: boolean;
@@ -13,11 +15,13 @@ interface ToolbarProps {
   onCancel: () => void;
   onToggleHideSystem: () => void;
   onToggleTypePanel: () => void;
+  onSearchSelect: (hit: SearchHit) => void;
 }
 
 export function Toolbar({
   scanning,
   snapshot,
+  generation,
   startError,
   hideSystem,
   typePanelOpen,
@@ -25,6 +29,7 @@ export function Toolbar({
   onCancel,
   onToggleHideSystem,
   onToggleTypePanel,
+  onSearchSelect,
 }: ToolbarProps) {
   const [path, setPath] = useState("");
 
@@ -48,9 +53,6 @@ export function Toolbar({
 
   return (
     <header className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
-      <span className="pr-2 text-sm font-semibold tracking-tight text-zinc-100">
-        mathom
-      </span>
       <input
         value={path}
         onChange={(e) => setPath(e.target.value)}
@@ -111,10 +113,17 @@ export function Toolbar({
           </>
         )}
       </div>
+      <div className="ml-3 shrink-0">
+        <SearchBox
+          generation={generation}
+          hideSystem={hideSystem}
+          onSelect={onSearchSelect}
+        />
+      </div>
       <button
         onClick={onToggleTypePanel}
         title="Show or hide the file-types panel"
-        className={`ml-3 h-8 shrink-0 rounded-md border px-3 text-[12px] ${
+        className={`ml-1 h-8 shrink-0 rounded-md border px-3 text-[12px] ${
           typePanelOpen
             ? "border-zinc-700 bg-zinc-800 text-zinc-200"
             : "border-zinc-800 bg-zinc-900 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"

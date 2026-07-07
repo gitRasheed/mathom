@@ -81,6 +81,20 @@ export interface TypePanelData {
   topFiles: Row[];
 }
 
+export interface SearchHit {
+  id: number;
+  name: string;
+  isDir: boolean;
+  size: number;
+  path: string;
+}
+
+export interface SearchResults {
+  hits: SearchHit[];
+  /** Every match, not just the returned top slice. */
+  total: number;
+}
+
 export interface ElevationStatus {
   elevated: boolean;
   /** Dev builds can't usefully relaunch — the UI hides the button. */
@@ -127,6 +141,8 @@ export const api = {
     invoke<TypePanelData>("get_type_stats", { generation, rootId, hideSystem }),
   getAncestors: (generation: number, id: number) =>
     invoke<Crumb[]>("get_ancestors", { generation, id }),
+  search: (generation: number, query: string, hideSystem: boolean) =>
+    invoke<SearchResults>("search", { generation, query, hideSystem }),
   deleteEntry: (generation: number, id: number, permanent: boolean) =>
     invoke<DeleteResult>("delete_entry", { generation, id, permanent }),
   openInExplorer: (generation: number, id: number) =>

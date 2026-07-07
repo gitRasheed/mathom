@@ -378,6 +378,62 @@ pub fn get_type_stats(
     })
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    id: NodeId,
+    name: String,
+    is_dir: bool,
+    size: u64,
+    path: String,
+}
+
+#[derive(Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultsDto {
+    hits: Vec<SearchHit>,
+    /// Every match, not just the returned top slice.
+    total: u64,
+}
+
+/// Scan-wide search (always the whole tree, not the treemap view root).
+/// The query-box grammar is parsed in core; an empty query returns nothing.
+#[tauri::command]
+pub fn search(
+    state: State<'_, AppState>,
+    generation: u64,
+    query: String,
+    hide_system: bool,
+) -> Result<SearchResultsDto, String> {
+    const MAX_RESULTS: usize = 100;
+
+    let q = mathom_core::search::SearchQuery::parse(&query);
+    if q.is_empty() {
+        return Ok(SearchResultsDto::default());
+    }
+    let session = session_for(&state, generation)?;
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    let res = mathom_core::search::search(tree, &q, MAX_RESULTS, hide_system);
+    Ok(SearchResultsDto {
+        hits: res
+            .ids
+            .into_iter()
+            .map(|id| {
+                let n = tree.node(id);
+                SearchHit {
+                    id,
+                    name: tree.name(id).to_string(),
+                    is_dir: n.is_dir(),
+                    size: n.size,
+                    path: tree.path(id),
+                }
+            })
+            .collect(),
+        total: res.total_matches,
+    })
+}
+
 /// Root-first chain of ancestors, ending with the node itself. Powers the
 /// treemap breadcrumbs and "reveal in tree".
 #[tauri::command]
