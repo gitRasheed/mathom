@@ -1,0 +1,45 @@
+name: Release
+
+# Tag a commit `v0.1.0-alpha.1` (etc.) and push the tag; this builds the
+# installers and portable zip and publishes a GitHub release. Installers are
+# unsigned — signing infra is a deliberate non-goal for now.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+        working-directory: ui
+      - run: npm run build:app
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $exe = if (Test-Path target/release/mathom.exe) { "target/release/mathom.exe" }
+                 else { "target/release/mathom-app.exe" }
+          Compress-Archive -Path $exe -DestinationPath "mathom-${{ github.ref_name }}-windows-x64-portable.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true # alpha: flip when the first stable ships
+          generate_release_notes: true
+          files: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+            mathom-*-portable.zip
