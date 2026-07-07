@@ -37,7 +37,17 @@ export default function App() {
   const [confirm, setConfirm] = useState<{ target: DeleteTarget; permanent: boolean } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [treeRevision, setTreeRevision] = useState(0);
+  // null = not yet known; banner only renders on a definite false.
+  const [elevated, setElevated] = useState<boolean | null>(null);
+  const [elevationDismissed, setElevationDismissed] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    api
+      .elevationStatus()
+      .then((s) => setElevated(s.elevated))
+      .catch(() => setElevated(true)); // unknown — don't nag
+  }, []);
 
   useEffect(() => {
     let timer = 0;
@@ -250,6 +260,16 @@ export default function App() {
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
       />
+      {elevated === false && !elevationDismissed && (
+        <ElevationBanner
+          onRelaunch={() =>
+            void api
+              .relaunchElevated()
+              .catch((e) => reportUiError("relaunching as administrator", e))
+          }
+          onDismiss={() => setElevationDismissed(true)}
+        />
+      )}
       {scan.scanning ? <div className="scan-progress" /> : <div className="h-[2px]" />}
       {scan.rootRow ? (
         <div ref={splitRef} className="flex min-h-0 flex-1">
@@ -322,6 +342,36 @@ export default function App() {
           onConfirm={() => void performDelete()}
         />
       )}
+    </div>
+  );
+}
+
+function ElevationBanner({
+  onRelaunch,
+  onDismiss,
+}: {
+  onRelaunch: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-1.5 text-xs">
+      <span className="min-w-0 truncate text-zinc-400">
+        Running without administrator rights — scans use the slower folder
+        walker and skip files it can't read.
+      </span>
+      <button
+        className="shrink-0 rounded border border-teal-700/60 px-2 py-0.5 text-teal-300 hover:bg-teal-900/40"
+        onClick={onRelaunch}
+      >
+        Relaunch as administrator
+      </button>
+      <button
+        className="ml-auto shrink-0 px-1 text-zinc-600 hover:text-zinc-300"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+      >
+        ✕
+      </button>
     </div>
   );
 }

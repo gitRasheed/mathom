@@ -63,6 +63,10 @@ export interface DeleteResult {
 
 export type SortKey = "name" | "size" | "items" | "mtime";
 
+export interface ElevationStatus {
+  elevated: boolean;
+}
+
 export const api = {
   startScan: (path: string) => invoke<number>("start_scan", { path }),
   cancelScan: () => invoke<void>("cancel_scan"),
@@ -105,6 +109,9 @@ export const api = {
     invoke<DeleteResult>("delete_entry", { generation, id, permanent }),
   openInExplorer: (generation: number, id: number) =>
     invoke<void>("open_in_explorer", { generation, id }),
+  elevationStatus: () => invoke<ElevationStatus>("elevation_status"),
+  /** Resolves only on decline (as an error); on success the app exits. */
+  relaunchElevated: () => invoke<void>("relaunch_elevated"),
 };
 
 export function onScanTick(cb: (s: Snapshot) => void): Promise<UnlistenFn> {

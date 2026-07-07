@@ -2171,6 +2171,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "trash",
+ "windows 0.62.2",
 ]
 
 [[package]]
