@@ -11,11 +11,11 @@ impl EntryFlags {
     pub const REPARSE: EntryFlags = EntryFlags(1 << 1);
     /// Directory could not be read (access denied, vanished mid-scan, ...).
     pub const ERROR: EntryFlags = EntryFlags(1 << 2);
-    /// NTFS-compressed (MFT backend only).
+    /// NTFS-compressed.
     pub const COMPRESSED: EntryFlags = EntryFlags(1 << 3);
-    /// Sparse file (MFT backend only).
+    /// Sparse file.
     pub const SPARSE: EntryFlags = EntryFlags(1 << 4);
-    /// Cloud placeholder, dehydrated (MFT backend only).
+    /// Cloud placeholder (OneDrive & co); dehydrated ones allocate ~nothing.
     pub const PLACEHOLDER: EntryFlags = EntryFlags(1 << 5);
     /// One of several hardlinks to the same file record (MFT backend only).
     pub const HARDLINK: EntryFlags = EntryFlags(1 << 6);

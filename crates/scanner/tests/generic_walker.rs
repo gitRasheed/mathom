@@ -206,6 +206,62 @@ fn junction_is_marked_and_not_descended() {
     assert_eq!(tree.node(Tree::ROOT).size, 1000);
 }
 
+/// Sparse files (and by the same attribute-driven path, compressed files
+/// and cloud placeholders) must report true on-disk allocation, not their
+/// logical size — a dehydrated OneDrive file is the worst case: huge
+/// logical size, near-zero allocation.
+#[cfg(windows)]
+#[test]
+fn sparse_file_reports_true_allocation() {
+    use std::io::Write;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let path = root.join("holey.bin");
+
+    let mut f = fs::File::create(&path).unwrap();
+    let status = std::process::Command::new("fsutil")
+        .args(["sparse", "setflag"])
+        .arg(&path)
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "fsutil sparse setflag failed (non-NTFS temp dir?)"
+    );
+    f.write_all(&[0xAB; 4096]).unwrap(); // 4 KiB of real data
+    f.set_len(8 * 1024 * 1024).unwrap(); // the rest is a hole
+    drop(f);
+
+    let (tree, stats) = scan_to_tree(root);
+
+    let holey = child_by_name(&tree, Tree::ROOT, "holey.bin");
+    let node = tree.node(holey);
+    assert!(
+        node.flags.contains(EntryFlags::SPARSE),
+        "sparse flag missing"
+    );
+    assert_eq!(
+        node.size,
+        8 * 1024 * 1024,
+        "logical size is the full extent"
+    );
+    assert!(
+        node.allocated < 1024 * 1024,
+        "allocated must reflect the hole, got {}",
+        node.allocated
+    );
+    assert!(
+        node.allocated >= 4096,
+        "the written 4 KiB is really allocated"
+    );
+    assert_eq!(
+        stats.bytes,
+        8 * 1024 * 1024,
+        "progress counts logical bytes"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn symlink_is_marked_and_not_descended() {

@@ -183,6 +183,7 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
 
         let mut flags = EntryFlags(0);
         let size;
+        let mut allocated = 0;
         if is_dir {
             flags.insert(EntryFlags::DIR);
             size = 0;
@@ -194,6 +195,19 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
             files += 1;
         } else {
             size = meta.len();
+            // Ordinary files: len() is the allocation, cluster rounding
+            // aside (the MFT backend reports it exactly). For attribute-
+            // flagged files len() can be off by the whole file — a
+            // dehydrated cloud placeholder allocates ~nothing — so ask for
+            // the real allocation. Path-based query, never opens for data
+            // (data opens can trigger Defender scans and cloud hydration).
+            let attr_flags = allocation_flags(file_attributes(&meta));
+            allocated = if attr_flags == EntryFlags(0) {
+                size
+            } else {
+                flags = flags.union(attr_flags);
+                allocated_on_disk(&dent.path()).unwrap_or(size)
+            };
             files += 1;
             bytes += size;
         }
@@ -210,9 +224,7 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
                 name_len: 0,
                 flags,
                 size,
-                // Generic walker approximation; the MFT backend reports
-                // real allocation (compression, sparse, cluster rounding).
-                allocated_size: size,
+                allocated_size: allocated,
                 mtime: mtime_secs(&meta),
             },
         );
@@ -292,6 +304,77 @@ fn is_system(_meta: &fs::Metadata) -> bool {
     false
 }
 
+#[cfg(windows)]
+fn file_attributes(meta: &fs::Metadata) -> u32 {
+    use std::os::windows::fs::MetadataExt;
+    meta.file_attributes()
+}
+
+#[cfg(not(windows))]
+fn file_attributes(_meta: &fs::Metadata) -> u32 {
+    0
+}
+
+/// Maps the Windows attribute bits under which a file's logical size
+/// misstates its on-disk allocation. Empty means `len()` can be trusted.
+fn allocation_flags(attrs: u32) -> EntryFlags {
+    const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x0200;
+    const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0800;
+    // The cloud-placeholder family (OneDrive & co): OFFLINE plus the two
+    // recall bits. Dehydrated files keep their full logical size but
+    // allocate almost nothing on disk.
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x4_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x40_0000;
+
+    let mut f = EntryFlags(0);
+    if attrs & FILE_ATTRIBUTE_SPARSE_FILE != 0 {
+        f.insert(EntryFlags::SPARSE);
+    }
+    if attrs & FILE_ATTRIBUTE_COMPRESSED != 0 {
+        f.insert(EntryFlags::COMPRESSED);
+    }
+    if attrs
+        & (FILE_ATTRIBUTE_OFFLINE
+            | FILE_ATTRIBUTE_RECALL_ON_OPEN
+            | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+        != 0
+    {
+        f.insert(EntryFlags::PLACEHOLDER);
+    }
+    f
+}
+
+/// True on-disk allocation via `GetCompressedFileSizeW` — a path-only
+/// metadata query (no handle with data access is ever opened). `None` on
+/// failure; callers fall back to the logical size.
+#[cfg(windows)]
+fn allocated_on_disk(path: &std::path::Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows::Win32::Foundation::GetLastError;
+    use windows::Win32::Storage::FileSystem::{GetCompressedFileSizeW, INVALID_FILE_SIZE};
+    use windows::core::PCWSTR;
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut high = 0u32;
+    // SAFETY: NUL-terminated path and valid out-pointer for the call.
+    let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
+    if low == INVALID_FILE_SIZE && unsafe { GetLastError() }.is_err() {
+        return None;
+    }
+    Some((high as u64) << 32 | low as u64)
+}
+
+#[cfg(not(windows))]
+fn allocated_on_disk(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
 fn mtime_secs(meta: &fs::Metadata) -> i64 {
     let Ok(modified) = meta.modified() else {
         return 0;
@@ -299,5 +382,29 @@ fn mtime_secs(meta: &fs::Metadata) -> i64 {
     match modified.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_secs() as i64,
         Err(e) => -(e.duration().as_secs() as i64),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the raw attribute values — a transposed bit here would silently
+    /// misclassify files (the sparse integration test covers only SPARSE).
+    #[test]
+    fn allocation_flags_map_the_documented_attribute_bits() {
+        assert_eq!(allocation_flags(0), EntryFlags(0));
+        assert_eq!(allocation_flags(0x0200), EntryFlags::SPARSE);
+        assert_eq!(allocation_flags(0x0800), EntryFlags::COMPRESSED);
+        assert_eq!(allocation_flags(0x1000), EntryFlags::PLACEHOLDER); // OFFLINE
+        assert_eq!(allocation_flags(0x4_0000), EntryFlags::PLACEHOLDER); // RECALL_ON_OPEN
+        assert_eq!(allocation_flags(0x40_0000), EntryFlags::PLACEHOLDER); // RECALL_ON_DATA_ACCESS
+        // A dehydrated OneDrive file carries several at once.
+        assert_eq!(
+            allocation_flags(0x0200 | 0x1000 | 0x40_0000),
+            EntryFlags::SPARSE.union(EntryFlags::PLACEHOLDER)
+        );
+        // Unrelated attributes (readonly, hidden, system, directory) map to nothing.
+        assert_eq!(allocation_flags(0x1 | 0x2 | 0x4 | 0x10), EntryFlags(0));
     }
 }

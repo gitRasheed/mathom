@@ -8,6 +8,14 @@ crossbeam-channel = "0.5.15"
 mathom-core = { version = "0.1.0", path = "../core" }
 rayon = "1.12.0"
 
+# For GetCompressedFileSizeW (true allocation of sparse/compressed/
+# placeholder files). The crate stays portable: target-gated only.
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
 [dev-dependencies]
 criterion = "0.8.2"
 tempfile = "3"
