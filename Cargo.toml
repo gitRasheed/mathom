@@ -16,8 +16,17 @@ lto = "thin"
 codegen-units = 1
 
 # `tauri dev` builds the app in dev profile; unoptimized scan code made a
-# C:\ scan take 66s vs 25s in release. Dependencies (which include the
-# workspace scanner/core crates when building mathom-app) get optimized;
-# the app's own code stays debuggable.
+# C:\ scan take 66s vs 25s in release. Cargo's `"*"` glob deliberately
+# EXCLUDES workspace members, so the scan hot path is named explicitly —
+# only mathom-app's own thin bridging code stays unoptimized/debuggable.
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.dev.package.mathom-core]
+opt-level = 3
+
+[profile.dev.package.mathom-scanner]
+opt-level = 3
+
+[profile.dev.package.mathom-scanner-ntfs]
+opt-level = 3

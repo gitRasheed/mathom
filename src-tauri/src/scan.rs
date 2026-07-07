@@ -486,7 +486,12 @@ fn drain(app: AppHandle, session: Arc<Session>) {
                     p.dirs = stats.dirs;
                     p.bytes = stats.bytes;
                     p.errors = stats.errors;
-                    p.finished_ms = Some(stats.elapsed.as_millis() as u64);
+                    // Time-to-ready, not the scanner's own elapsed: the
+                    // bounded channel can hold the bulk of a fast scan, so
+                    // the scanner finishes well before ingestion does. The
+                    // status bar must agree with the live timer the user
+                    // just watched.
+                    p.finished_ms = Some(session.started.elapsed().as_millis() as u64);
                     p.state = if p.root_error.is_some() {
                         ScanState::Failed
                     } else if stats.cancelled {
