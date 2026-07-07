@@ -65,6 +65,8 @@ export type SortKey = "name" | "size" | "items" | "mtime";
 
 export interface ElevationStatus {
   elevated: boolean;
+  /** Dev builds can't usefully relaunch — the UI hides the button. */
+  devBuild: boolean;
 }
 
 export const api = {

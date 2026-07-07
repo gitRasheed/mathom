@@ -6,7 +6,13 @@ import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
 import { Treemap } from "./components/Treemap";
 import { useScan } from "./hooks/useScan";
-import { api, type Row, type Snapshot, type TreemapRect } from "./lib/api";
+import {
+  api,
+  type ElevationStatus,
+  type Row,
+  type Snapshot,
+  type TreemapRect,
+} from "./lib/api";
 import { copyText } from "./lib/clipboard";
 import { onUiError, reportUiError, reportUnlessStale } from "./lib/errors";
 
@@ -37,16 +43,16 @@ export default function App() {
   const [confirm, setConfirm] = useState<{ target: DeleteTarget; permanent: boolean } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [treeRevision, setTreeRevision] = useState(0);
-  // null = not yet known; banner only renders on a definite false.
-  const [elevated, setElevated] = useState<boolean | null>(null);
+  // null = not yet known; banner only renders on a definite non-elevated.
+  const [elevation, setElevation] = useState<ElevationStatus | null>(null);
   const [elevationDismissed, setElevationDismissed] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api
       .elevationStatus()
-      .then((s) => setElevated(s.elevated))
-      .catch(() => setElevated(true)); // unknown — don't nag
+      .then(setElevation)
+      .catch(() => setElevation(null)); // unknown — don't nag
   }, []);
 
   useEffect(() => {
@@ -260,8 +266,9 @@ export default function App() {
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
       />
-      {elevated === false && !elevationDismissed && (
+      {elevation !== null && !elevation.elevated && !elevationDismissed && (
         <ElevationBanner
+          devBuild={elevation.devBuild}
           onRelaunch={() =>
             void api
               .relaunchElevated()
@@ -347,9 +354,11 @@ export default function App() {
 }
 
 function ElevationBanner({
+  devBuild,
   onRelaunch,
   onDismiss,
 }: {
+  devBuild: boolean;
   onRelaunch: () => void;
   onDismiss: () => void;
 }) {
@@ -358,13 +367,16 @@ function ElevationBanner({
       <span className="min-w-0 truncate text-zinc-400">
         Running without administrator rights — scans use the slower folder
         walker and skip files it can't read.
+        {devBuild && " Start the dev loop from an elevated terminal instead."}
       </span>
-      <button
-        className="shrink-0 rounded border border-teal-700/60 px-2 py-0.5 text-teal-300 hover:bg-teal-900/40"
-        onClick={onRelaunch}
-      >
-        Relaunch as administrator
-      </button>
+      {!devBuild && (
+        <button
+          className="shrink-0 rounded border border-teal-700/60 px-2 py-0.5 text-teal-300 hover:bg-teal-900/40"
+          onClick={onRelaunch}
+        >
+          Relaunch as administrator
+        </button>
+      )}
       <button
         className="ml-auto shrink-0 px-1 text-zinc-600 hover:text-zinc-300"
         onClick={onDismiss}

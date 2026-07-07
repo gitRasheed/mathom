@@ -14,12 +14,16 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct ElevationStatus {
     pub elevated: bool,
+    /// Dev builds can't usefully relaunch (the elevated instance loses the
+    /// dev server), so the UI hides the relaunch button when this is set.
+    pub dev_build: bool,
 }
 
 #[tauri::command]
 pub fn elevation_status() -> ElevationStatus {
     ElevationStatus {
         elevated: is_elevated(),
+        dev_build: cfg!(debug_assertions),
     }
 }
 
