@@ -291,8 +291,8 @@ mod tests {
     }
 
     fn sweep(mut img: Vec<u8>) -> Table {
-        let total = img.len() / 1024;
-        let mut s = Sweep::new(total, 1024);
+        let total = (img.len() / 1024) as u32;
+        let mut s = Sweep::new(total, 1024).unwrap();
         s.consume(0, &mut img);
         s.finish()
     }

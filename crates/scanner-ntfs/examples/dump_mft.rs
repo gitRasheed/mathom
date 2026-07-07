@@ -29,7 +29,7 @@ fn main() {
     });
     let map = map_mft(&volume, &mount).expect("mapping the $MFT");
     let record = map.geometry.record_size as u64;
-    let mut remaining = (map.mft_bytes / record) * record;
+    let mut remaining = map.total_records as u64 * record;
     println!(
         "dumping {} MiB of $MFT ({} records, {} extents) to {out_path}…",
         remaining >> 20,

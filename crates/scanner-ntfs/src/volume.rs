@@ -14,11 +14,12 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::IO::{DeviceIoControl, OVERLAPPED};
 use windows::Win32::System::Ioctl::{
-    FSCTL_GET_RETRIEVAL_POINTERS, RETRIEVAL_POINTERS_BUFFER, STARTING_VCN_INPUT_BUFFER,
+    FSCTL_GET_RETRIEVAL_POINTERS, GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO,
+    RETRIEVAL_POINTERS_BUFFER, STARTING_VCN_INPUT_BUFFER,
 };
 use windows::core::{Owned, PCWSTR};
 
-use crate::boot::{Geometry, parse_boot_sector};
+use crate::boot::{Geometry, geometry_fits_device, parse_boot_sector, plan_mft_read};
 use crate::record::parse_record0;
 use crate::runs::Extent;
 
@@ -172,6 +173,29 @@ impl Volume {
         Ok(())
     }
 
+    /// The volume's real byte length, from the driver — the ground truth
+    /// that disk-supplied sizes (boot sector, record 0) are checked against.
+    pub fn length(&self) -> Result<u64, String> {
+        let mut info = GET_LENGTH_INFORMATION::default();
+        let mut written = 0u32;
+        // SAFETY: the out-pointer is a valid GET_LENGTH_INFORMATION for the
+        // duration of the call.
+        unsafe {
+            DeviceIoControl(
+                *self.handle,
+                IOCTL_DISK_GET_LENGTH_INFO,
+                None,
+                0,
+                Some(&mut info as *mut _ as *mut _),
+                size_of::<GET_LENGTH_INFORMATION>() as u32,
+                Some(&mut written),
+                None,
+            )
+        }
+        .map_err(|e| format!("volume length: {e}"))?;
+        u64::try_from(info.Length).map_err(|_| "volume reports a negative length".into())
+    }
+
     /// The $MFT's extents via `FSCTL_GET_RETRIEVAL_POINTERS` on the given
     /// handle-able path — the fallback when record 0's run list is
     /// incomplete, and the debug cross-check for the parsed one.
@@ -242,20 +266,27 @@ impl Volume {
     }
 }
 
-/// Everything needed to read the whole $MFT.
+/// Everything needed to read the whole $MFT. Sizes are validated by
+/// `plan_mft_read` against the volume's geometry and the device's real
+/// length, so downstream offset math and the slot-table size are bounded.
 pub struct MftMap {
     pub geometry: Geometry,
     pub extents: Vec<Extent>,
-    /// Total record bytes (the $MFT $DATA real size).
+    /// Total record bytes (the $MFT $DATA real size, extent-capped).
     pub mft_bytes: u64,
+    pub total_records: u32,
 }
 
 /// Reads the boot sector + record 0 and produces the read plan. `mount` is
 /// used for the FSCTL fallback when record 0's runs are incomplete.
 pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
+    let device_bytes = volume.length()?;
     let mut boot = AlignedBuf::new(4096);
     volume.read_at(0, boot.as_mut_slice())?;
     let geometry = parse_boot_sector(boot.as_mut_slice()).map_err(|e| e.to_string())?;
+    // Nothing may be sized or offset from the boot sector's totals until
+    // they're proven to fit the actual device (record 0's offset included).
+    geometry_fits_device(&geometry, device_bytes).map_err(|e| e.to_string())?;
     if !(geometry.cluster_size as u64).is_multiple_of(geometry.record_size as u64) {
         // Extents would not be record-aligned (sub-1KiB clusters). Rare
         // enough that falling back to the walker beats complicating reads.
@@ -265,7 +296,7 @@ pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
     let mut rec0 = AlignedBuf::new(4096);
     volume.read_at(geometry.mft_byte_offset(), rec0.as_mut_slice())?;
     let rec0_slice = &mut rec0.as_mut_slice()[..geometry.record_size as usize];
-    let (extents, mft_bytes) = match parse_record0(rec0_slice) {
+    let (extents, data_size) = match parse_record0(rec0_slice) {
         Ok(m) => {
             #[cfg(debug_assertions)]
             if let Ok(fsctl) = Volume::mft_extents_via_fsctl(mount) {
@@ -274,23 +305,20 @@ pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
             (m.extents, m.data_size)
         }
         Err(crate::ParseError("$MFT runs incomplete in record 0")) => {
-            // Heavily fragmented $MFT: let the filesystem enumerate it.
-            let extents = Volume::mft_extents_via_fsctl(mount)?;
-            let covered: u64 = extents.iter().map(|e| e.clusters).sum();
-            (extents, covered * geometry.cluster_size as u64)
+            // Heavily fragmented $MFT: let the filesystem enumerate it. No
+            // real $DATA size here — the plan reads all covered clusters.
+            (Volume::mft_extents_via_fsctl(mount)?, u64::MAX)
         }
         Err(e) => return Err(e.to_string()),
     };
 
-    let covered: u64 = extents.iter().map(|e| e.clusters).sum();
-    if covered * geometry.cluster_size as u64 == 0 {
-        return Err("$MFT extent map is empty".into());
-    }
-    let mft_bytes = mft_bytes.min(covered * geometry.cluster_size as u64);
+    let plan =
+        plan_mft_read(&geometry, &extents, data_size, device_bytes).map_err(|e| e.to_string())?;
     Ok(MftMap {
         geometry,
         extents,
-        mft_bytes,
+        mft_bytes: plan.mft_bytes,
+        total_records: plan.total_records,
     })
 }
 

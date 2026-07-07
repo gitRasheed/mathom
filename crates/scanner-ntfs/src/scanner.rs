@@ -92,8 +92,7 @@ fn scan_inner(
     let t_mapped = Instant::now();
 
     let record_size = map.geometry.record_size as usize;
-    let total_records = (map.mft_bytes / record_size as u64) as usize;
-    let mut sweep = Sweep::new(total_records, record_size);
+    let mut sweep = Sweep::new(map.total_records, record_size)?;
 
     // Reader thread streams extents; this thread parses. The ring of
     // buffers travels full→parse→empty→read.
@@ -165,7 +164,7 @@ fn scan_inner(
             t_swept - t_mapped,
             map.mft_bytes as f64 / 1e9 / (t_swept - t_mapped).as_secs_f64(),
             map.mft_bytes >> 20,
-            total_records,
+            map.total_records,
             t_swept.elapsed(),
             start.elapsed(),
         );
@@ -188,9 +187,10 @@ enum ReaderMsg {
 }
 
 /// Streams the $MFT extent by extent in `BUF_BYTES` chunks. Every read
-/// offset/length is cluster- (and therefore record- and sector-) aligned
-/// except the final tail, which rounds up to a whole record — still within
-/// the extent's allocated clusters.
+/// offset/length is record- (and therefore sector-) aligned: `mft_bytes`
+/// rounds down to whole records, and a partial trailing record can't hold
+/// a live FILE record anyway. Offset math can't overflow — `map`'s extents
+/// are validated against the device size (`plan_mft_read`).
 fn read_mft(
     volume: Volume,
     map: &MftMap,
@@ -200,7 +200,7 @@ fn read_mft(
 ) {
     let cluster = map.geometry.cluster_size as u64;
     let record = map.geometry.record_size as u64;
-    let mut remaining = (map.mft_bytes / record) * record;
+    let mut remaining = map.total_records as u64 * record;
     let mut next_record = 0usize;
 
     for extent in &map.extents {

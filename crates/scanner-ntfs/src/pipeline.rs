@@ -110,19 +110,25 @@ struct TaskOut {
 }
 
 impl Sweep {
-    pub fn new(total_records: usize, record_size: usize) -> Self {
+    /// `total_records` comes validated from `plan_mft_read` (its u32 type is
+    /// the proof). The slot table is the one allocation proportional to
+    /// disk-supplied sizes, so it's fallible: a table the machine can't hold
+    /// is an error, not an OOM abort.
+    pub fn new(total_records: u32, record_size: usize) -> Result<Self, String> {
         assert!(record_size >= 512 && record_size.is_power_of_two());
-        assert!(
-            total_records <= u32::MAX as usize,
-            "MFT record count fits u32"
-        );
-        Sweep {
-            records: vec![Slot::EMPTY; total_records],
+        let total = total_records as usize;
+        let mut records = Vec::new();
+        records
+            .try_reserve_exact(total)
+            .map_err(|_| format!("cannot allocate the MFT slot table ({total} records)"))?;
+        records.resize(total, Slot::EMPTY);
+        Ok(Sweep {
+            records,
             arenas: Vec::new(),
             patches: Vec::new(),
             record_size,
             torn: 0,
-        }
+        })
     }
 
     /// Parses one buffer of records starting at record number
@@ -257,8 +263,8 @@ mod tests {
     use crate::fixture::{RecordBuilder, image, root_dir};
 
     fn sweep_image(mut img: Vec<u8>, record_size: usize) -> (Table, ChunkCounts) {
-        let total = img.len() / record_size;
-        let mut sweep = Sweep::new(total, record_size);
+        let total = (img.len() / record_size) as u32;
+        let mut sweep = Sweep::new(total, record_size).unwrap();
         let counts = sweep.consume(0, &mut img);
         (sweep.finish(), counts)
     }
@@ -337,7 +343,7 @@ mod tests {
 
         let (single, _) = sweep_image(img.clone(), 1024);
 
-        let mut sweep = Sweep::new(total, 1024);
+        let mut sweep = Sweep::new(total as u32, 1024).unwrap();
         let mut img2 = img;
         let split = 20 * 1024; // record boundary in the middle
         let (a, b) = img2.split_at_mut(split);

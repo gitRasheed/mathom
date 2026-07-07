@@ -178,8 +178,14 @@ pub fn parse_record0(rec: &mut [u8]) -> Result<MftSelf, ParseError> {
             return Err(ParseError("record 0 run list out of bounds"));
         }
         let extents = crate::runs::decode_runs(&attr[run_off..])?;
-        let covered: u64 = extents.iter().map(|e| e.clusters).sum();
-        if covered != highest_vcn + 1 {
+        let covered = extents
+            .iter()
+            .try_fold(0u64, |acc, e| acc.checked_add(e.clusters))
+            .ok_or(ParseError("record 0 run map overflows"))?;
+        let span = highest_vcn
+            .checked_add(1)
+            .ok_or(ParseError("record 0 run map overflows"))?;
+        if covered != span {
             return Err(ParseError("$MFT runs incomplete in record 0"));
         }
         return Ok(MftSelf { data_size, extents });
@@ -741,6 +747,38 @@ mod tests {
         assert_eq!(
             parse_record0(&mut rec),
             Err(ParseError("$MFT runs incomplete in record 0"))
+        );
+    }
+
+    #[test]
+    fn record0_with_overflowing_run_sum_is_an_error() {
+        // Run 1: u64::MAX clusters, run 2: 2 more — the cluster sum
+        // overflows u64. Must be a parse error, never a panic.
+        let runs = [
+            0x18, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, // u64::MAX at +1
+            0x11, 0x02, 0x01, // 2 clusters at +1
+            0x00,
+        ];
+        let mut rec = RecordBuilder::file()
+            .name(5, 5, 3, "$MFT")
+            .data_nonresident_with_runs(0x180 * 4096, 0x17F, &runs)
+            .build(0, 1024);
+        assert_eq!(
+            parse_record0(&mut rec),
+            Err(ParseError("record 0 run map overflows"))
+        );
+    }
+
+    #[test]
+    fn record0_with_max_vcn_is_an_error() {
+        // highest_vcn = u64::MAX makes the record span (vcn + 1) overflow.
+        let mut rec = RecordBuilder::file()
+            .name(5, 5, 3, "$MFT")
+            .data_nonresident_with_runs(4096, u64::MAX, &[0x11, 0x01, 0x01, 0x00])
+            .build(0, 1024);
+        assert_eq!(
+            parse_record0(&mut rec),
+            Err(ParseError("record 0 run map overflows"))
         );
     }
 

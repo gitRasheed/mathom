@@ -177,7 +177,7 @@ fn sweep(img: &[u8]) -> Table {
     let record_size = 1024;
     let total = img.len() / record_size;
     let mut owned = img.to_vec();
-    let mut sweep = Sweep::new(total, record_size);
+    let mut sweep = Sweep::new(total as u32, record_size).unwrap();
     // Feed in two chunks to keep the chunked path honest.
     let split = (total / 2) * record_size;
     let (a, b) = owned.split_at_mut(split);
