@@ -143,6 +143,9 @@ export function Treemap({
   // Root the current crumbs belong to; names are immutable, so crumbs only
   // need refetching when the view root changes (not on every tick).
   const crumbsRootRef = useRef<number | null>(null);
+  // Ancestor ids of the view root (crumbs, view root included): hovering one
+  // of these tree rows means "the whole view is inside this folder".
+  const crumbIdsRef = useRef<Set<number>>(new Set());
   const lastFetchRef = useRef(0);
   const fetchSeqRef = useRef(0);
   const zoomRafRef = useRef(0);
@@ -170,9 +173,13 @@ export function Treemap({
     if (!overlay) return;
     const ctx = overlay.getContext("2d")!;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
+    // Between drill start and the new layout landing, the rect list is the
+    // OLD view — rings would land on the wrong tiles over the zoom
+    // animation. fetchLayout redraws on arrival (bake → blit → here).
+    if (hitFrozenRef.current) return;
     const dpr = window.devicePixelRatio || 1;
     const outline = (id: number | null, color: string, width: number) => {
-      // The view root fills the canvas; outlining it is pure noise.
+      // The view root fills the canvas; a persistent outline is pure noise.
       if (id === null || id === rootIdRef.current) return;
       const r = byIdRef.current.get(id);
       if (!r) return;
@@ -182,8 +189,17 @@ export function Treemap({
       ctx.strokeRect(s.x + width / 2, s.y + width / 2, s.w - width, s.h - width);
     };
     outline(selectedRef.current, "#f4f4f5", 2);
-    if (hoveredIdRef.current !== selectedRef.current) {
-      outline(hoveredIdRef.current, "#2dd4bf", 2);
+    const hovered = hoveredIdRef.current;
+    if (hovered !== null && hovered !== selectedRef.current) {
+      if (hovered === rootIdRef.current || crumbIdsRef.current.has(hovered)) {
+        // Hovering the view root's row (or an ancestor of it): everything on
+        // screen is inside that folder, so answer with a whole-view ring.
+        ctx.strokeStyle = "#2dd4bf";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(1.5, 1.5, overlay.width - 3, overlay.height - 3);
+      } else {
+        outline(hovered, "#2dd4bf", 2);
+      }
     }
   }, []);
 
@@ -260,7 +276,9 @@ export function Treemap({
       .getAncestors(generation, forRoot)
       .then((crumbs) => {
         crumbsRootRef.current = forRoot;
+        crumbIdsRef.current = new Set(crumbs.map((c) => c.id));
         setCrumbs(crumbs);
+        drawOverlay(); // the current hover may have just become an ancestor
       })
       .catch((e) => {
         // "unknown node" is expected while the tree is still empty at scan
@@ -269,7 +287,7 @@ export function Treemap({
           reportUnlessStale("loading breadcrumbs", e);
         }
       });
-  }, []);
+  }, [drawOverlay]);
 
   const fetchLayout = useCallback(async () => {
     const container = containerRef.current;
@@ -311,6 +329,7 @@ export function Treemap({
       hitFrozenRef.current = true;
       setTooltip(null);
       mouseOverRef.current = null;
+      drawOverlay(); // clear rings: they describe the view being left
 
       // Bitmap zoom toward the target's old rect while the layout loads;
       // navigating to something not in view (breadcrumb, tree) swaps flat.
@@ -347,7 +366,7 @@ export function Treemap({
 
       void fetchLayout();
     },
-    [blit, fetchLayout],
+    [blit, drawOverlay, fetchLayout],
   );
 
   // The view root is controlled: App changed it (selection / navigation).
@@ -367,6 +386,7 @@ export function Treemap({
     mouseOverRef.current = null;
     hitFrozenRef.current = false;
     crumbsRootRef.current = null;
+    crumbIdsRef.current = new Set();
     offscreenRef.current = null;
     const base = baseRef.current;
     if (base) base.getContext("2d")!.clearRect(0, 0, base.width, base.height);
