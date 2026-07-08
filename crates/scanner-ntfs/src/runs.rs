@@ -57,6 +57,40 @@ pub fn decode_runs(data: &[u8]) -> Result<Vec<Extent>, ParseError> {
     Err(ParseError("run list missing terminator"))
 }
 
+/// Σ clusters of the backed runs in a run list; hole runs (offset width 0)
+/// back nothing and count 0. This is the allocation ground truth: header
+/// size fields over-report holey streams — $BadClus's $Bad claims the whole
+/// volume, backed by nothing, without even a sparse flag (real-C: finding,
+/// cross-checked against WizTree).
+pub fn backed_clusters(data: &[u8]) -> Result<u64, ParseError> {
+    let mut pos = 0usize;
+    let mut total = 0u64;
+
+    while pos < data.len() {
+        let header = data[pos];
+        if header == 0 {
+            return Ok(total);
+        }
+        pos += 1;
+        let len_width = (header & 0x0F) as usize;
+        let off_width = (header >> 4) as usize;
+        if len_width == 0 || len_width > 8 || off_width > 8 {
+            return Err(ParseError("run header has implausible field widths"));
+        }
+        let end = pos + len_width + off_width;
+        if end > data.len() {
+            return Err(ParseError("run list truncated"));
+        }
+        if off_width != 0 {
+            total = total
+                .checked_add(uint_le(&data[pos..pos + len_width]))
+                .ok_or(ParseError("backed cluster count overflow"))?;
+        }
+        pos = end;
+    }
+    Err(ParseError("run list missing terminator"))
+}
+
 fn uint_le(bytes: &[u8]) -> u64 {
     let mut v = 0u64;
     for (i, &b) in bytes.iter().enumerate() {
@@ -153,5 +187,27 @@ mod tests {
     #[test]
     fn empty_input_is_an_error() {
         assert!(decode_runs(&[]).is_err());
+    }
+
+    #[test]
+    fn backed_sum_skips_holes() {
+        // 3 backed clusters at LCN 1, a 1000-cluster hole, 2 more backed.
+        let data = [0x11, 0x03, 0x01, 0x02, 0xE8, 0x03, 0x11, 0x02, 0x01, 0x00];
+        assert_eq!(backed_clusters(&data), Ok(5));
+    }
+
+    #[test]
+    fn backed_sum_of_hole_only_list_is_zero() {
+        // The $BadClus:$Bad shape: one giant hole, nothing backed.
+        let data = [0x04, 0x89, 0xF7, 0x17, 0x06, 0x00];
+        assert_eq!(backed_clusters(&data), Ok(0));
+    }
+
+    #[test]
+    fn backed_sum_rejects_garbled_lists() {
+        assert!(backed_clusters(&[0x11, 0x10]).is_err()); // truncated fields
+        assert!(backed_clusters(&[0x11, 0x10, 0x34]).is_err()); // no terminator
+        assert!(backed_clusters(&[]).is_err());
+        assert!(backed_clusters(&[0xF0, 0x01]).is_err()); // zero length width
     }
 }

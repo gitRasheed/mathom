@@ -59,7 +59,12 @@ fn build_image() -> Vec<u8> {
 
 fn swept(img: &[u8]) -> Table {
     let mut owned = img.to_vec();
-    let mut sweep = Sweep::new((owned.len() / RECORD_SIZE) as u32, RECORD_SIZE).unwrap();
+    let mut sweep = Sweep::new(
+        (owned.len() / RECORD_SIZE) as u32,
+        RECORD_SIZE,
+        mathom_scanner_ntfs::fixture::CLUSTER as u32,
+    )
+    .unwrap();
     sweep.consume(0, &mut owned);
     sweep.finish()
 }
@@ -75,8 +80,12 @@ fn bench_mft(c: &mut Criterion) {
         b.iter_batched(
             || img.clone(),
             |mut fresh| {
-                let mut sweep =
-                    Sweep::new((fresh.len() / RECORD_SIZE) as u32, RECORD_SIZE).unwrap();
+                let mut sweep = Sweep::new(
+                    (fresh.len() / RECORD_SIZE) as u32,
+                    RECORD_SIZE,
+                    mathom_scanner_ntfs::fixture::CLUSTER as u32,
+                )
+                .unwrap();
                 sweep.consume(0, &mut fresh);
                 sweep.finish()
             },

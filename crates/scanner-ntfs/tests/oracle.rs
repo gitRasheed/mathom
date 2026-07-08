@@ -1,7 +1,7 @@
 //! Record-for-record parity between our hand-rolled reader and the `mft`
 //! crate — the north-star correctness oracle (plan.md). The oracle parses
-//! the *same bytes*; our documented policy (name ranking, Σ-streams
-//! allocated, VCN-0 logical, extension merge) is recomputed on top of the
+//! the *same bytes*; our documented policy (name ranking, backed-run
+//! allocation, VCN-0 logical, extension merge) is recomputed on top of the
 //! oracle's parsed fields, so every byte-offset interpretation is genuinely
 //! cross-checked rather than asserted against our own output.
 //!
@@ -15,10 +15,15 @@ use mathom_scanner_ntfs::fixture::{RecordBuilder, image, root_dir};
 use mathom_scanner_ntfs::pipeline::{NO_NAME, Sweep, Table};
 
 use mft::MftParser;
+use mft::attribute::data_run::RunType;
 use mft::attribute::header::ResidentialHeader;
 use mft::attribute::x30::FileNamespace;
 use mft::attribute::{MftAttributeContent, MftAttributeType};
 use mft::entry::MftEntry;
+
+/// Fixtures are built for 4 KiB clusters; the real C: dump (no boot sector
+/// travels with it) is also a 4 KiB-cluster volume.
+const CLUSTER: u64 = mathom_scanner_ntfs::fixture::CLUSTER;
 
 /// One merged base record as the oracle sees it (crate-parsed fields, our
 /// policy arithmetic).
@@ -63,9 +68,9 @@ fn fold_entry(e: &MftEntry, x: &mut Expect) {
         let attr = attr.expect("oracle should parse fixture attributes");
         let unnamed = attr.header.name_size == 0;
 
-        // $DATA sizes come from the attribute *header* (the crate wraps
-        // non-resident content as DataRun, resident as AttrX80 — the header
-        // is authoritative either way).
+        // $DATA logical size comes from the attribute *header*; allocation
+        // comes from the run list (the crate wraps non-resident content as
+        // DataRun, resident as AttrX80).
         if attr.header.type_code == MftAttributeType::DATA {
             match &attr.header.residential_header {
                 ResidentialHeader::Resident(r) => {
@@ -75,15 +80,31 @@ fn fold_entry(e: &MftEntry, x: &mut Expect) {
                     }
                 }
                 ResidentialHeader::NonResident(nr) => {
+                    // Mirror the backed-run policy: Σ Standard runs × cluster
+                    // (holes back nothing), with the parser's header fallback
+                    // when no run list is available.
+                    let backed = match &attr.data {
+                        MftAttributeContent::DataRun(rl) => Some(
+                            rl.data_runs
+                                .iter()
+                                .filter(|r| r.run_type == RunType::Standard)
+                                .map(|r| r.lcn_length)
+                                .sum::<u64>()
+                                * CLUSTER,
+                        ),
+                        _ => None,
+                    };
                     if nr.vnc_first != 0 {
+                        x.alloc += backed.unwrap_or(0);
                         continue;
                     }
-                    let alloc = if nr.unit_compression_size != 0 {
-                        nr.total_allocated.unwrap_or(nr.allocated_length)
-                    } else {
-                        nr.allocated_length
-                    };
-                    x.alloc += alloc;
+                    x.alloc += backed.unwrap_or_else(|| {
+                        if nr.unit_compression_size != 0 {
+                            nr.total_allocated.unwrap_or(nr.allocated_length)
+                        } else {
+                            nr.allocated_length
+                        }
+                    });
                     if unnamed && !x.has_logical {
                         x.logical = nr.file_size;
                         x.has_logical = true;
@@ -177,7 +198,7 @@ fn sweep(img: &[u8]) -> Table {
     let record_size = 1024;
     let total = img.len() / record_size;
     let mut owned = img.to_vec();
-    let mut sweep = Sweep::new(total as u32, record_size).unwrap();
+    let mut sweep = Sweep::new(total as u32, record_size, CLUSTER as u32).unwrap();
     // Feed in two chunks to keep the chunked path honest.
     let split = (total / 2) * record_size;
     let (a, b) = owned.split_at_mut(split);

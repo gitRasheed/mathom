@@ -81,6 +81,7 @@ pub struct Sweep {
     arenas: Vec<String>,
     patches: Vec<(u64, Slot)>,
     record_size: usize,
+    cluster_size: u32,
     torn: u64,
 }
 
@@ -94,8 +95,9 @@ struct TaskOut {
 impl Sweep {
     /// Fallibly allocates the slot table — the one allocation proportional
     /// to disk-supplied sizes (`total_records` is validated by `plan_mft_read`).
-    pub fn new(total_records: u32, record_size: usize) -> Result<Self, String> {
+    pub fn new(total_records: u32, record_size: usize, cluster_size: u32) -> Result<Self, String> {
         assert!(record_size >= 512 && record_size.is_power_of_two());
+        assert!(cluster_size >= 512 && cluster_size.is_power_of_two());
         let total = total_records as usize;
         let mut records = Vec::new();
         records
@@ -107,6 +109,7 @@ impl Sweep {
             arenas: Vec::new(),
             patches: Vec::new(),
             record_size,
+            cluster_size,
             torn: 0,
         })
     }
@@ -121,6 +124,7 @@ impl Sweep {
         assert!(first_record + n <= self.records.len());
 
         let arena_base = self.arenas.len() as u32;
+        let cluster_size = self.cluster_size;
         let outs: Vec<TaskOut> = self.records[first_record..first_record + n]
             .par_chunks_mut(TASK_RECORDS)
             .zip(buf.par_chunks_mut(TASK_RECORDS * rs))
@@ -134,7 +138,7 @@ impl Sweep {
                     torn: 0,
                 };
                 for (slot, rec) in slots.iter_mut().zip(bytes.chunks_mut(rs)) {
-                    match record::parse_record(rec, &mut out.arena) {
+                    match record::parse_record(rec, &mut out.arena, cluster_size) {
                         Ok(Some(facts)) => place(facts, arena_idx, slot, &mut out),
                         Ok(None) => {}
                         Err(_) => out.torn += 1,
@@ -239,7 +243,7 @@ mod tests {
 
     fn sweep_image(mut img: Vec<u8>, record_size: usize) -> (Table, ChunkCounts) {
         let total = (img.len() / record_size) as u32;
-        let mut sweep = Sweep::new(total, record_size).unwrap();
+        let mut sweep = Sweep::new(total, record_size, crate::fixture::CLUSTER as u32).unwrap();
         let counts = sweep.consume(0, &mut img);
         (sweep.finish(), counts)
     }
@@ -316,7 +320,7 @@ mod tests {
 
         let (single, _) = sweep_image(img.clone(), 1024);
 
-        let mut sweep = Sweep::new(total as u32, 1024).unwrap();
+        let mut sweep = Sweep::new(total as u32, 1024, crate::fixture::CLUSTER as u32).unwrap();
         let mut img2 = img;
         let split = 20 * 1024; // record boundary in the middle
         let (a, b) = img2.split_at_mut(split);

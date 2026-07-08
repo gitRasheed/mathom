@@ -37,7 +37,8 @@ pub struct RecordFacts {
     /// Unnamed $DATA real size.
     pub logical: u64,
     pub has_logical: bool,
-    /// Σ allocated over all streams (unnamed + ADS); resident data counts 0.
+    /// Σ backed run clusters × cluster size over all streams (unnamed +
+    /// ADS); resident data counts 0.
     pub alloc: u64,
     pub reparse_tag: u32,
     /// Non-DOS $FILE_NAME count — >1 on a base record means hardlinks.
@@ -55,7 +56,11 @@ const ATTR_END: u32 = 0xFFFF_FFFF;
 const NS_DOS: u8 = 2;
 
 /// Parses one FILE record in place; `Ok(None)` means free or not a FILE record.
-pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordFacts>, ParseError> {
+pub fn parse_record(
+    rec: &mut [u8],
+    arena: &mut String,
+    cluster_size: u32,
+) -> Result<Option<RecordFacts>, ParseError> {
     debug_assert!(rec.len() >= 512 && rec.len().is_power_of_two());
     if &rec[0..4] != b"FILE" {
         return Ok(None);
@@ -101,7 +106,7 @@ pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordF
         match u32_at(attr, 0) {
             ATTR_STANDARD_INFORMATION => std_info(attr, &mut facts)?,
             ATTR_FILE_NAME => file_name(attr, arena, &mut facts)?,
-            ATTR_DATA => data(attr, &mut facts)?,
+            ATTR_DATA => data(attr, &mut facts, cluster_size)?,
             ATTR_REPARSE_POINT => reparse_point(attr, &mut facts),
             _ => {} // $ATTRIBUTE_LIST skipped; the full sweep sees extension records.
         }
@@ -293,7 +298,7 @@ fn name_rank(namespace: u8) -> u8 {
     }
 }
 
-fn data(attr: &[u8], facts: &mut RecordFacts) -> Result<(), ParseError> {
+fn data(attr: &[u8], facts: &mut RecordFacts, cluster_size: u32) -> Result<(), ParseError> {
     let named = attr[9] != 0;
     if attr[8] == 0 {
         // Resident: the bytes live inside the MFT record, so allocation
@@ -309,17 +314,41 @@ fn data(attr: &[u8], facts: &mut RecordFacts) -> Result<(), ParseError> {
     if attr.len() < 64 {
         return Err(ParseError("non-resident header truncated"));
     }
+
+    // Allocation truth is the run list, not the header size fields: those
+    // over-report holey streams ($BadClus's $Bad claims the whole volume,
+    // backed by nothing, with no sparse flag or total_allocated — real-C:
+    // finding). Every fragment carries its own runs; the patch merge sums
+    // them, so fragmented attributes total correctly.
+    let mapping_off = u16_at(attr, 32) as usize;
+    let backed = attr
+        .get(mapping_off..)
+        .filter(|_| mapping_off >= 64)
+        .and_then(|runs| crate::runs::backed_clusters(runs).ok());
+
     if u64_at(attr, 16) != 0 {
-        return Ok(()); // lowest VCN > 0: continuation fragment; sizes live in VCN-0
+        // Continuation fragment (lowest VCN > 0): its size fields are stale
+        // copies, so only its runs contribute.
+        let clusters = backed.unwrap_or(0);
+        facts.alloc = facts
+            .alloc
+            .saturating_add(clusters.saturating_mul(cluster_size as u64));
+        return Ok(());
     }
-    let compression_unit = u16_at(attr, 34);
-    let alloc = if compression_unit != 0 {
-        if attr.len() < 72 {
-            return Err(ParseError("compressed data header truncated"));
+
+    let alloc = match backed {
+        Some(clusters) => clusters.saturating_mul(cluster_size as u64),
+        // Unreadable run list: trust the header rather than dropping the
+        // stream (total_allocated when a compression unit says it exists,
+        // else allocated_size).
+        None => {
+            let compression_unit = u16_at(attr, 34);
+            if compression_unit != 0 && attr.len() >= 72 {
+                u64_at(attr, 64)
+            } else {
+                u64_at(attr, 40)
+            }
         }
-        u64_at(attr, 64) // total_allocated: the truly backed bytes
-    } else {
-        u64_at(attr, 40)
     };
     facts.alloc = facts.alloc.saturating_add(alloc);
 
@@ -378,10 +407,12 @@ mod tests {
     const FT_2020: u64 = 132_223_104_000_000_000; // 2020-01-01T00:00:00Z
     const UNIX_2020: i64 = 1_577_836_800;
 
+    const CLUSTER: u32 = crate::fixture::CLUSTER as u32;
+
     fn parse_one(builder: RecordBuilder) -> (Option<RecordFacts>, String) {
         let mut arena = String::new();
         let mut bytes = builder.build(30, 1024);
-        let facts = parse_record(&mut bytes, &mut arena).expect("record should parse");
+        let facts = parse_record(&mut bytes, &mut arena, CLUSTER).expect("record should parse");
         (facts, arena)
     }
 
@@ -432,9 +463,17 @@ mod tests {
     fn zeroed_and_garbage_buffers_are_skipped() {
         let mut arena = String::new();
         let mut zeroed = vec![0u8; 1024];
-        assert!(parse_record(&mut zeroed, &mut arena).unwrap().is_none());
+        assert!(
+            parse_record(&mut zeroed, &mut arena, CLUSTER)
+                .unwrap()
+                .is_none()
+        );
         let mut garbage = vec![0xABu8; 1024];
-        assert!(parse_record(&mut garbage, &mut arena).unwrap().is_none());
+        assert!(
+            parse_record(&mut garbage, &mut arena, CLUSTER)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -446,7 +485,7 @@ mod tests {
         bytes[1022] ^= 0xFF;
         let mut arena = String::new();
         assert_eq!(
-            parse_record(&mut bytes, &mut arena),
+            parse_record(&mut bytes, &mut arena, CLUSTER),
             Err(ParseError("torn record (fixup mismatch)"))
         );
     }
@@ -459,7 +498,9 @@ mod tests {
             .data_resident_bytes(&payload)
             .build(30, 1024);
         let mut arena = String::new();
-        let facts = parse_record(&mut bytes, &mut arena).unwrap().unwrap();
+        let facts = parse_record(&mut bytes, &mut arena, CLUSTER)
+            .unwrap()
+            .unwrap();
         assert_eq!(facts.logical, 700);
         let start = bytes.windows(700).any(|w| w == payload);
         assert!(start, "payload should be restored verbatim after fixups");
@@ -520,16 +561,48 @@ mod tests {
     }
 
     #[test]
-    fn continuation_fragment_contributes_nothing() {
+    fn continuation_fragment_adds_its_runs_but_not_its_sizes() {
         let (facts, _) = parse_one(
             RecordBuilder::file()
                 .name(5, 5, 1, "frag.bin")
                 .data_nonresident(4096, 4096)
-                .data_continuation(64),
+                .data_continuation(64, 3 * 4096),
         );
         let f = facts.unwrap();
-        assert_eq!(f.logical, 4096);
-        assert_eq!(f.alloc, 4096);
+        assert_eq!(f.logical, 4096, "poison sizes in the fragment stay unread");
+        assert_eq!(f.alloc, 4 * 4096, "fragment runs join the stream's total");
+    }
+
+    #[test]
+    fn badclus_shaped_hole_only_stream_allocates_nothing() {
+        // $BadClus:$Bad on real volumes: the header claims the whole volume
+        // (allocated_size = file_size = volume bytes) with no sparse flag
+        // and no total_allocated — one hole run is the only truth.
+        let (facts, _) = parse_one(
+            RecordBuilder::file()
+                .name(5, 5, 3, "$BadClus")
+                .data_resident_bytes(&[])
+                .named_data_hole_only("$Bad", 418_750_435_328),
+        );
+        let f = facts.unwrap();
+        assert_eq!(
+            f.logical, 0,
+            "logical comes from the resident unnamed stream"
+        );
+        assert_eq!(f.alloc, 0, "a hole-only stream backs no clusters");
+        assert!(!f.flags.contains(EntryFlags::SPARSE));
+    }
+
+    #[test]
+    fn garbled_run_list_falls_back_to_header_allocated() {
+        // Runs cut off mid-field: keep the file, trust the header.
+        let (facts, _) = parse_one(
+            RecordBuilder::file()
+                .name(5, 5, 1, "odd.bin")
+                .data_nonresident_with_runs(8192, 1, &[0x21, 0x02]),
+        );
+        let f = facts.unwrap();
+        assert_eq!(f.alloc, 8192);
     }
 
     #[test]
@@ -653,14 +726,14 @@ mod tests {
             copy[first_attr + 4..first_attr + 8].copy_from_slice(&bad_len.to_le_bytes());
             let mut arena = String::new();
             assert!(
-                parse_record(&mut copy, &mut arena).is_err(),
+                parse_record(&mut copy, &mut arena, CLUSTER).is_err(),
                 "len {bad_len} must be rejected"
             );
         }
         // Also: first-attribute offset pointing past the record.
         bytes[0x14..0x16].copy_from_slice(&2000u16.to_le_bytes());
         let mut arena = String::new();
-        assert!(parse_record(&mut bytes, &mut arena).is_err());
+        assert!(parse_record(&mut bytes, &mut arena, CLUSTER).is_err());
     }
 
     #[test]
@@ -677,7 +750,7 @@ mod tests {
             }
             buf[0..4].copy_from_slice(b"FILE");
             buf[0x16] |= 0x1;
-            let _ = parse_record(&mut buf, &mut arena); // any Ok/Err, no panic
+            let _ = parse_record(&mut buf, &mut arena, CLUSTER); // any Ok/Err, no panic
         }
     }
 

@@ -103,7 +103,7 @@ impl RecordBuilder {
 
     pub fn data_nonresident(mut self, real: u64, alloc: u64) -> Self {
         self.attrs
-            .push(nonres_attr(0x80, 0, "", 0, alloc, real, 0, None));
+            .push(nonres_attr(0x80, 0, "", 0, alloc, real, 0, None, alloc));
         self
     }
 
@@ -119,26 +119,30 @@ impl RecordBuilder {
             real,
             4,
             Some(total_alloc),
+            total_alloc,
         ));
         self
     }
 
+    /// Sparse $DATA as Windows writes it: sparse flag set, compression unit
+    /// 0, no total_allocated field — the run list alone says what's backed.
     pub fn data_nonresident_sparse(mut self, real: u64, backed: u64) -> Self {
         self.attrs.push(nonres_attr(
-            0x80,
-            0x8000,
-            "",
-            0,
-            real,
-            real,
-            4,
-            Some(backed),
+            0x80, 0x8000, "", 0, real, real, 0, None, backed,
         ));
+        self
+    }
+
+    /// The $BadClus:$Bad shape: the header claims `span` bytes allocated and
+    /// the run list is one giant hole — no sparse flag, no total_allocated.
+    pub fn named_data_hole_only(mut self, stream: &str, span: u64) -> Self {
+        self.attrs
+            .push(nonres_attr(0x80, 0, stream, 0, span, span, 0, None, 0));
         self
     }
 
     pub fn data_nonresident_with_runs(mut self, real: u64, highest_vcn: u64, runs: &[u8]) -> Self {
-        let mut a = nonres_attr(0x80, 0, "", 0, real, real, 0, None);
+        let mut a = nonres_attr(0x80, 0, "", 0, real, real, 0, None, 0);
         a[24..32].copy_from_slice(&highest_vcn.to_le_bytes());
         let run_off = u16::from_le_bytes([a[32], a[33]]) as usize;
         a.truncate(run_off);
@@ -152,15 +156,16 @@ impl RecordBuilder {
 
     pub fn named_data_nonresident(mut self, stream: &str, real: u64, alloc: u64) -> Self {
         self.attrs
-            .push(nonres_attr(0x80, 0, stream, 0, alloc, real, 0, None));
+            .push(nonres_attr(0x80, 0, stream, 0, alloc, real, 0, None, alloc));
         self
     }
 
-    /// Continuation fragment (lowest VCN > 0); its sizes are poison values —
-    /// only the VCN-0 fragment's sizes are real.
-    pub fn data_continuation(mut self, lowest_vcn: u64) -> Self {
+    /// Continuation fragment (lowest VCN > 0); its size fields are poison
+    /// values — only the VCN-0 fragment's sizes are real. Its run list is
+    /// real and backs `backed` bytes.
+    pub fn data_continuation(mut self, lowest_vcn: u64, backed: u64) -> Self {
         self.attrs.push(nonres_attr(
-            0x80, 0, "", lowest_vcn, 0xD1E5, 0xD1E5, 0, None,
+            0x80, 0, "", lowest_vcn, 0xD1E5, 0xD1E5, 0, None, backed,
         ));
         self
     }
@@ -261,6 +266,32 @@ fn resident_attr(ty: u32, attr_flags: u16, name: &str, value: &[u8]) -> Vec<u8> 
     a
 }
 
+/// Fixtures assume 4 KiB clusters; parse tests must pass the same size.
+pub const CLUSTER: u64 = 4096;
+
+/// Wire-encodes a run list: one backed run at LCN 1 of `backed` clusters,
+/// then one hole run of `holes` clusters, then the terminator.
+fn encode_runs(backed: u64, holes: u64) -> Vec<u8> {
+    fn le_min(v: u64) -> Vec<u8> {
+        let width = (8 - v.leading_zeros() as usize / 8).max(1);
+        v.to_le_bytes()[..width].to_vec()
+    }
+    let mut out = Vec::new();
+    if backed > 0 {
+        let len = le_min(backed);
+        out.push(0x10 | len.len() as u8);
+        out.extend_from_slice(&len);
+        out.push(0x01);
+    }
+    if holes > 0 {
+        let len = le_min(holes);
+        out.push(len.len() as u8);
+        out.extend_from_slice(&len);
+    }
+    out.push(0);
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn nonres_attr(
     ty: u32,
@@ -271,6 +302,7 @@ fn nonres_attr(
     real: u64,
     compression_unit: u16,
     total_alloc: Option<u64>,
+    backed: u64,
 ) -> Vec<u8> {
     assert_eq!(
         total_alloc.is_some(),
@@ -280,9 +312,12 @@ fn nonres_attr(
     let units: Vec<u16> = name.encode_utf16().collect();
     let name_off = if total_alloc.is_some() { 0x48 } else { 0x40 };
     let run_off = align8(name_off + 2 * units.len());
-    // A plausible little run list; the record parser never reads it, the
-    // oracle may. One cluster at LCN 1 (or a fragment for continuations).
-    let runs: &[u8] = &[0x11, 0x01, 0x01, 0x00];
+    let backed_clusters = backed.div_ceil(CLUSTER);
+    let span_clusters = alloc.max(real).div_ceil(CLUSTER);
+    let runs = encode_runs(
+        backed_clusters,
+        span_clusters.saturating_sub(backed_clusters),
+    );
     let total = align8(run_off + runs.len());
     let mut a = vec![0u8; total];
     write_common_header(&mut a, ty, total, true, &units, name_off, attr_flags);
@@ -296,7 +331,7 @@ fn nonres_attr(
     if let Some(t) = total_alloc {
         a[64..72].copy_from_slice(&t.to_le_bytes());
     }
-    a[run_off..run_off + runs.len()].copy_from_slice(runs);
+    a[run_off..run_off + runs.len()].copy_from_slice(&runs);
     a
 }
 

@@ -77,7 +77,7 @@ fn scan_inner(
     let t_mapped = Instant::now();
 
     let record_size = map.geometry.record_size as usize;
-    let mut sweep = Sweep::new(map.total_records, record_size)?;
+    let mut sweep = Sweep::new(map.total_records, record_size, map.geometry.cluster_size)?;
 
     // Reader thread streams extents; this thread parses. The ring of
     // buffers travels full→parse→empty→read.
