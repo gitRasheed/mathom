@@ -204,9 +204,9 @@ pub fn scan_status(state: State<'_, AppState>) -> Snapshot {
     }
 }
 
-/// Children of each requested directory, sorted. Non-directories and ids the
-/// tree hasn't seen yet are silently skipped, so the UI can ask optimistically
-/// mid-scan.
+/// Children of each requested directory, sorted. Non-directories and ids that
+/// aren't live (not yet seen, or vacated by a delete) are silently skipped,
+/// so the UI can ask optimistically mid-scan.
 #[tauri::command]
 pub fn get_children(
     state: State<'_, AppState>,
@@ -221,7 +221,7 @@ pub fn get_children(
     let tree = builder.tree();
     let mut listings = Vec::with_capacity(ids.len());
     for id in ids {
-        if (id as usize) >= tree.len() || !tree.node(id).is_dir() {
+        if !tree.is_live(id) || !tree.node(id).is_dir() {
             continue;
         }
         let parent_size = tree.node(id).size;
@@ -245,7 +245,7 @@ pub fn get_node(
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
-    if (id as usize) >= tree.len() {
+    if !tree.is_live(id) {
         return Ok(None);
     }
     // Root has no parent: report pct 1.0 against itself.
@@ -261,7 +261,7 @@ pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Resu
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
-    if (id as usize) >= tree.len() {
+    if !tree.is_live(id) {
         return Err("unknown node".into());
     }
     Ok(tree.path(id))
@@ -282,6 +282,12 @@ pub fn get_treemap(
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
+    // View queries answer a stale root (deleted while a re-query was already
+    // in flight) with an empty layout, not an error: the UI re-points at the
+    // parent a frame later and an error toast would be noise.
+    if !tree.is_live(root_id) {
+        return Ok(Vec::new());
+    }
     let opts = TreemapOptions {
         min_area_px: 3.0,
         padding_px: 1.0,
@@ -349,7 +355,9 @@ pub fn get_type_stats(
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
-    if (root_id as usize) >= tree.len() {
+    // The panel's catch treats "unknown node" as an expected race, same as
+    // the pre-delete stale-root case — see the comment in get_treemap.
+    if !tree.is_live(root_id) {
         return Err("unknown node".into());
     }
 
@@ -445,7 +453,7 @@ pub fn get_ancestors(
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
-    if (id as usize) >= tree.len() {
+    if !tree.is_live(id) {
         return Err("unknown node".into());
     }
     let mut chain = vec![id];
@@ -480,7 +488,9 @@ pub fn delete_entry(
     let (path, parent_id, is_dir) = {
         let builder = session.builder.read().unwrap();
         let tree = builder.tree();
-        if (id as usize) >= tree.len() {
+        // A vacant slot here means the id outlived a delete; without this
+        // check tree.path() would hand the fs ops an empty/garbage path.
+        if !tree.is_live(id) {
             return Err("unknown item".into());
         }
         if id == Tree::ROOT {
@@ -536,7 +546,7 @@ pub fn open_in_explorer(
     let (path, is_dir) = {
         let builder = session.builder.read().unwrap();
         let tree = builder.tree();
-        if (id as usize) >= tree.len() {
+        if !tree.is_live(id) {
             return Err("unknown item".into());
         }
         (tree.path(id), tree.node(id).is_dir())

@@ -109,6 +109,18 @@ impl Tree {
         &self.nodes[id as usize]
     }
 
+    /// Whether `id` refers to a node currently part of the tree: in range and
+    /// either the root or still linked to a parent. Ids from outside (the UI)
+    /// can be stale — pointing at slots vacated by [`Tree::remove_subtree`] or
+    /// never filled at all — and must pass this before the slot is trusted.
+    /// (Not `is_vacant`: a childless root has the same all-NONE link shape.)
+    pub fn is_live(&self, id: NodeId) -> bool {
+        match self.nodes.get(id as usize) {
+            Some(n) => id == Self::ROOT || n.parent != NONE,
+            None => false,
+        }
+    }
+
     pub fn name(&self, id: NodeId) -> &str {
         self.names.get(self.nodes[id as usize].name_ref())
     }
@@ -551,5 +563,41 @@ mod tests {
         // The slot is now detached; a second remove is a no-op.
         assert_eq!(tree.remove_subtree(3), None);
         assert_eq!(tree.node(0).size, root_size);
+    }
+
+    #[test]
+    fn is_live_rejects_removed_subtree_and_out_of_range() {
+        let mut tree = sample_tree();
+        tree.remove_subtree(1).unwrap();
+
+        assert!(!tree.is_live(1)); // the removed dir itself
+        assert!(!tree.is_live(2)); // a file that was inside it
+        assert!(!tree.is_live(3)); // a dir that was inside it
+        assert!(!tree.is_live(99)); // out of range
+        assert!(tree.is_live(0)); // root untouched
+        assert!(tree.is_live(5)); // untouched sibling
+    }
+
+    #[test]
+    fn is_live_accepts_childless_root() {
+        // A root with no children yet has all links == NONE, the same shape
+        // as a vacant slot — it must still count as live.
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
+        let tree = builder.finish();
+        assert!(tree.is_live(0));
+        assert!(!tree.is_live(1));
+    }
+
+    #[test]
+    fn is_live_rejects_never_filled_gap_slots() {
+        // A cancelled scan can allocate ids whose batches never arrive:
+        // entry 2 forces slot 1 into existence as a vacant placeholder.
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
+        builder.add_batch(&batch(&[("f", entry(2, 0, FILE, 5))]));
+        let tree = builder.finish();
+        assert!(!tree.is_live(1));
+        assert!(tree.is_live(2));
     }
 }
