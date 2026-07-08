@@ -545,7 +545,11 @@ pub fn open_in_explorer(
 fn reveal_in_file_manager(path: &str, is_dir: bool) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
-    let mut cmd = Command::new("explorer");
+    // Absolute path: a bare "explorer" resolves through a search order an
+    // attacker-writable directory could shadow.
+    let explorer = std::path::Path::new(&std::env::var_os("WINDIR").ok_or("WINDIR is not set")?)
+        .join("explorer.exe");
+    let mut cmd = Command::new(explorer);
     if is_dir {
         cmd.arg(path);
     } else {
