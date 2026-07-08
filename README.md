@@ -1,8 +1,13 @@
+<img src="src-tauri/icons/icon.svg" alt="" width="96" align="left">
+
 # mathom
 
 A fast disk space analyzer for Windows: scan a drive, see where the space
 went, clean it up. Live tree + zoomable treemap + file-type breakdown +
 search, with delete to the Recycle Bin.
+
+<br clear="left">
+
 
 **Status: alpha.** Scanning and the UI work end to end; expect rough edges,
 missing polish, and breaking changes between releases. Windows is the only
