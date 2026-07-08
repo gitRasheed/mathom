@@ -33,6 +33,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
         working-directory: ui
+      - run: npm run lint
+        working-directory: ui
+      - run: npm run format:check
+        working-directory: ui
       # tsc + vite; also produces ui/dist, which tauri::generate_context!
       # embeds at compile time — must run before any cargo build of the app.
       - run: npm run build

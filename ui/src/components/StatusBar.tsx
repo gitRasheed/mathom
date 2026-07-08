@@ -38,7 +38,10 @@ export function StatusBar({ snapshot, selectedPath, uiError }: StatusBarProps) {
         {stateLabel(snapshot)}
       </span>
       {uiError && (
-        <span className="max-w-96 shrink-0 truncate text-red-400" title={uiError}>
+        <span
+          className="max-w-96 shrink-0 truncate text-red-400"
+          title={uiError}
+        >
           {uiError}
         </span>
       )}

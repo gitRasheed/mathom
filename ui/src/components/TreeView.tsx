@@ -226,7 +226,7 @@ function Header({
         Size{arrow("size")}
       </button>
       {cols.pct && (
-        <span className="flex items-center justify-end py-1.5 pr-3 text-[11px] font-medium uppercase tracking-wide text-zinc-600">
+        <span className="flex items-center justify-end py-1.5 pr-3 text-[11px] font-medium tracking-wide text-zinc-600 uppercase">
           % of parent
         </span>
       )}

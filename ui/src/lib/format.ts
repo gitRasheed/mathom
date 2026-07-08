@@ -34,5 +34,7 @@ export function formatPercent(fraction: number): string {
 }
 
 export function formatElapsed(ms: number): string {
-  return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`;
+  return ms < 10_000
+    ? `${(ms / 1000).toFixed(1)}s`
+    : `${Math.round(ms / 1000)}s`;
 }

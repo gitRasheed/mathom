@@ -42,8 +42,15 @@ export default function App() {
   const [uiError, setUiError] = useState<string | null>(null);
   // Right-click menu + delete-confirmation state, and a counter the treemap
   // watches so it re-lays-out after an out-of-band tree mutation (a delete).
-  const [menu, setMenu] = useState<{ x: number; y: number; target: DeleteTarget } | null>(null);
-  const [confirm, setConfirm] = useState<{ target: DeleteTarget; permanent: boolean } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    target: DeleteTarget;
+  } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    target: DeleteTarget;
+    permanent: boolean;
+  } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [treeRevision, setTreeRevision] = useState(0);
   // null = not yet known; banner only renders on a definite non-elevated.
@@ -327,7 +334,11 @@ export default function App() {
           onDismiss={() => setElevationDismissed(true)}
         />
       )}
-      {scan.scanning ? <div className="scan-progress" /> : <div className="h-[2px]" />}
+      {scan.scanning ? (
+        <div className="scan-progress" />
+      ) : (
+        <div className="h-[2px]" />
+      )}
       {scan.rootRow ? (
         <div ref={splitRef} className="flex min-h-0 flex-1">
           <div
@@ -459,7 +470,9 @@ function EmptyState({ snapshot }: { snapshot: Snapshot | null }) {
         </p>
       ) : (
         <div className="text-center">
-          <p className="text-sm text-zinc-400">Choose a folder and start a scan.</p>
+          <p className="text-sm text-zinc-400">
+            Choose a folder and start a scan.
+          </p>
           <p className="mt-1.5 text-xs text-zinc-600">
             The tree and treemap fill in live while the scan runs.
           </p>

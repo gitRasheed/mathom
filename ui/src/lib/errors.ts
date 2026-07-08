@@ -23,7 +23,8 @@ export function reportUiError(context: string, error: unknown): void {
 export function isStale(error: unknown): boolean {
   const s = String(error);
   return (
-    s.includes("stale scan generation") || s.includes("no scan has been started")
+    s.includes("stale scan generation") ||
+    s.includes("no scan has been started")
   );
 }
 

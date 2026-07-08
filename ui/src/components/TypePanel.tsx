@@ -80,7 +80,7 @@ export function TypePanel({
   return (
     <div className="flex w-64 shrink-0 flex-col border-l border-zinc-800">
       <div className="flex h-8 shrink-0 items-center border-b border-zinc-800 px-3">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+        <span className="text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
           File types
         </span>
       </div>
@@ -113,12 +113,14 @@ export function TypePanel({
                 label="other"
                 files={data.otherFiles}
                 bytes={data.otherBytes}
-                pct={data.totalBytes > 0 ? data.otherBytes / data.totalBytes : 0}
+                pct={
+                  data.totalBytes > 0 ? data.otherBytes / data.totalBytes : 0
+                }
               />
             )}
             {data.topFiles.length > 0 && (
               <>
-                <div className="mt-3 border-b border-zinc-800 px-3 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                <div className="mt-3 border-b border-zinc-800 px-3 pb-1.5 text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
                   Largest files
                 </div>
                 <div className="pt-1">

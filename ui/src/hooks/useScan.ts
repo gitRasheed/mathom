@@ -220,7 +220,9 @@ export function useScan(): ScanController {
 
   const changeSort = useCallback((key: SortKey) => {
     setSort((prev) =>
-      prev.key === key ? { key, desc: !prev.desc } : { key, desc: key !== "name" },
+      prev.key === key
+        ? { key, desc: !prev.desc }
+        : { key, desc: key !== "name" },
     );
   }, []);
 

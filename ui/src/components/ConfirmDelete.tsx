@@ -79,7 +79,10 @@ export function ConfirmDelete({
         </h2>
 
         <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2">
-          <div className="truncate text-[13px] font-medium text-zinc-200" title={target.name}>
+          <div
+            className="truncate text-[13px] font-medium text-zinc-200"
+            title={target.name}
+          >
             {target.name}
           </div>
           <div
@@ -107,7 +110,11 @@ export function ConfirmDelete({
 
         <p
           className={`mt-2 text-[11px] ${
-            blocked ? "text-amber-400" : permanent ? "text-red-400" : "text-zinc-500"
+            blocked
+              ? "text-amber-400"
+              : permanent
+                ? "text-red-400"
+                : "text-zinc-500"
           }`}
         >
           {blocked ??

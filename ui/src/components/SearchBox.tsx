@@ -20,7 +20,11 @@ function parentDir(path: string): string {
   return i > 0 ? path.slice(0, i) : path;
 }
 
-export function SearchBox({ generation, hideSystem, onSelect }: SearchBoxProps) {
+export function SearchBox({
+  generation,
+  hideSystem,
+  onSelect,
+}: SearchBoxProps) {
   const [text, setText] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
   const [open, setOpen] = useState(false);
@@ -126,11 +130,13 @@ export function SearchBox({ generation, hideSystem, onSelect }: SearchBoxProps) 
         placeholder="Search — ext:mp4 >1gb"
         spellCheck={false}
         disabled={generation === 0}
-        title={"Space-separated filters, all must match:\nname substring · ext:mp4 · >100mb"}
+        title={
+          "Space-separated filters, all must match:\nname substring · ext:mp4 · >100mb"
+        }
         className="h-8 w-56 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-[13px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-teal-700 disabled:opacity-40"
       />
       {open && results && (
-        <div className="absolute right-0 top-9 z-50 w-[26rem] overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 shadow-xl">
+        <div className="absolute top-9 right-0 z-50 w-[26rem] overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 shadow-xl">
           <div className="border-b border-zinc-800 px-3 py-1 text-[11px] text-zinc-500">
             {results.total === 0
               ? "No matches"

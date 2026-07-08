@@ -173,7 +173,12 @@ export function Treemap({
       const s = snap(r, dpr, 0);
       ctx.strokeStyle = color;
       ctx.lineWidth = width;
-      ctx.strokeRect(s.x + width / 2, s.y + width / 2, s.w - width, s.h - width);
+      ctx.strokeRect(
+        s.x + width / 2,
+        s.y + width / 2,
+        s.w - width,
+        s.h - width,
+      );
     };
     outline(selectedRef.current, "#f4f4f5", 2);
     const hovered = hoveredIdRef.current;
@@ -199,7 +204,17 @@ export function Treemap({
     // Scaled draw: a plain copy when sizes match (the usual case), and
     // during a pane resize it stretches the old bitmap to the new size —
     // no crop-jump frame between the resize and the relayout landing.
-    ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, base.width, base.height);
+    ctx.drawImage(
+      off,
+      0,
+      0,
+      off.width,
+      off.height,
+      0,
+      0,
+      base.width,
+      base.height,
+    );
     drawOverlay();
   }, [drawOverlay]);
 
@@ -297,7 +312,13 @@ export function Treemap({
     const forRoot = rootIdRef.current;
     lastFetchRef.current = performance.now();
     try {
-      const rects = await api.getTreemap(generation, forRoot, w, h, hideSystemRef.current);
+      const rects = await api.getTreemap(
+        generation,
+        forRoot,
+        w,
+        h,
+        hideSystemRef.current,
+      );
       if (seq !== fetchSeqRef.current || forRoot !== rootIdRef.current) return;
       rectsRef.current = rects;
       byIdRef.current = new Map(rects.map((r) => [r.id, r]));
@@ -449,36 +470,47 @@ export function Treemap({
     };
   }, [blit, fetchLayout]);
 
-  const hitTest = useCallback((cssX: number, cssY: number): TreemapRect | null => {
-    if (hitFrozenRef.current) return null;
-    const rects = rectsRef.current;
-    // Reverse iteration = deepest-first (parents are emitted before children).
-    for (let i = rects.length - 1; i >= 0; i--) {
-      const r = rects[i];
-      if (cssX >= r.x && cssX < r.x + r.w && cssY >= r.y && cssY < r.y + r.h) {
-        return r;
+  const hitTest = useCallback(
+    (cssX: number, cssY: number): TreemapRect | null => {
+      if (hitFrozenRef.current) return null;
+      const rects = rectsRef.current;
+      // Reverse iteration = deepest-first (parents are emitted before children).
+      for (let i = rects.length - 1; i >= 0; i--) {
+        const r = rects[i];
+        if (
+          cssX >= r.x &&
+          cssX < r.x + r.w &&
+          cssY >= r.y &&
+          cssY < r.y + r.h
+        ) {
+          return r;
+        }
       }
-    }
-    return null;
-  }, []);
+      return null;
+    },
+    [],
+  );
 
   /// The depth-1 directory under the point: what the zoom gestures target.
-  const regionAt = useCallback((cssX: number, cssY: number): TreemapRect | null => {
-    if (hitFrozenRef.current) return null;
-    for (const r of rectsRef.current) {
-      if (
-        r.depth === 1 &&
-        r.isDir &&
-        cssX >= r.x &&
-        cssX < r.x + r.w &&
-        cssY >= r.y &&
-        cssY < r.y + r.h
-      ) {
-        return r;
+  const regionAt = useCallback(
+    (cssX: number, cssY: number): TreemapRect | null => {
+      if (hitFrozenRef.current) return null;
+      for (const r of rectsRef.current) {
+        if (
+          r.depth === 1 &&
+          r.isDir &&
+          cssX >= r.x &&
+          cssX < r.x + r.w &&
+          cssY >= r.y &&
+          cssY < r.y + r.h
+        ) {
+          return r;
+        }
       }
-    }
-    return null;
-  }, []);
+      return null;
+    },
+    [],
+  );
 
   // Positions the tooltip at the last cursor position. Needed outside
   // mousemove too: the div mounts only after the debounce + fetch, usually
@@ -661,13 +693,17 @@ export function Treemap({
         {tooltip && (
           <div
             ref={tooltipRef}
-            className="pointer-events-none absolute left-0 top-0 z-10 max-w-64 rounded-md border border-zinc-700 bg-zinc-900/95 px-2.5 py-1.5 text-xs shadow-lg"
+            className="pointer-events-none absolute top-0 left-0 z-10 max-w-64 rounded-md border border-zinc-700 bg-zinc-900/95 px-2.5 py-1.5 text-xs shadow-lg"
           >
-            <div className="truncate font-medium text-zinc-100">{tooltip.name}</div>
+            <div className="truncate font-medium text-zinc-100">
+              {tooltip.name}
+            </div>
             <div className="tnum text-zinc-400">
               {tooltip.size} · {tooltip.pct} of parent
             </div>
-            <div className="truncate text-[11px] text-zinc-500">{tooltip.path}</div>
+            <div className="truncate text-[11px] text-zinc-500">
+              {tooltip.path}
+            </div>
           </div>
         )}
       </div>

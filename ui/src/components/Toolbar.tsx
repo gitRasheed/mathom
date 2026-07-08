@@ -87,7 +87,7 @@ export function Toolbar({
       )}
       {startError && <span className="text-xs text-red-400">{startError}</span>}
       <label
-        className="ml-2 flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-zinc-400"
+        className="ml-2 flex cursor-pointer items-center gap-1.5 text-[12px] text-zinc-400 select-none"
         title="Hide OS/system files (pagefile, hiberfil, System Volume Information, …)"
       >
         <input
