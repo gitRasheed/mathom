@@ -1,6 +1,4 @@
-// Copy plain text to the clipboard. Prefers the async Clipboard API (available
-// in the Tauri webview's secure context); falls back to a hidden textarea for
-// environments where it's blocked.
+// Clipboard API first; hidden textarea fallback for locked-down webviews.
 export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -8,7 +6,7 @@ export async function copyText(text: string): Promise<boolean> {
       return true;
     }
   } catch {
-    // fall through to the legacy path
+    // fall through to the textarea path
   }
   try {
     const el = document.createElement("textarea");

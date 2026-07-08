@@ -1,7 +1,5 @@
-//! Scan output data model: what any `Scanner` backend emits and what
-//! `TreeBuilder` consumes. Plain data, no behavior.
+//! Scan output data model.
 
-/// Bit flags describing a scanned entry. Stored per node (u16).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct EntryFlags(pub u16);
 
@@ -19,9 +17,7 @@ impl EntryFlags {
     pub const PLACEHOLDER: EntryFlags = EntryFlags(1 << 5);
     /// One of several hardlinks to the same file record (MFT backend only).
     pub const HARDLINK: EntryFlags = EntryFlags(1 << 6);
-    /// Has the OS "system" attribute (Windows FILE_ATTRIBUTE_SYSTEM): pagefile,
-    /// hiberfil, System Volume Information, $Recycle.Bin, ... Hidden by the
-    /// "hide system files" view filter. Never set on non-Windows.
+    /// Windows FILE_ATTRIBUTE_SYSTEM.
     pub const SYSTEM: EntryFlags = EntryFlags(1 << 7);
 
     pub fn contains(self, other: EntryFlags) -> bool {
@@ -45,30 +41,22 @@ impl EntryFlags {
     }
 }
 
-/// One scanned file or directory. Names live in the owning batch's `names`
-/// buffer (`name_off..name_off + name_len`) so a batch is two allocations,
-/// not thousands.
+/// One scanned file or directory.
 #[derive(Clone, Copy, Debug)]
 pub struct FileEntry {
-    /// Dense id assigned by the scanner; doubles as the arena node index.
     pub path_id: u32,
-    /// Parent's `path_id`. The scanner guarantees the parent entry was
-    /// emitted in an earlier batch (root: `parent_id == path_id == 0`).
+    /// Parent was emitted earlier; root has `parent_id == path_id == 0`.
     pub parent_id: u32,
     pub name_off: u32,
     pub name_len: u16,
     pub flags: EntryFlags,
-    /// Logical size in bytes. Directories report 0 (their aggregate is
-    /// computed from children).
+    /// Logical size in bytes; directories report 0.
     pub size: u64,
-    /// On-disk allocated size. Generic walker approximates this as `size`;
-    /// the MFT backend reports real allocation.
+    /// On-disk allocated size.
     pub allocated_size: u64,
-    /// Modification time, seconds since Unix epoch (0 if unavailable).
     pub mtime: i64,
 }
 
-/// A batch of entries sharing one name buffer.
 #[derive(Clone, Debug, Default)]
 pub struct EntryBatch {
     pub names: String,
@@ -83,9 +71,7 @@ impl EntryBatch {
         }
     }
 
-    /// Appends an entry, copying `name` into the shared buffer.
-    /// Names longer than u16::MAX bytes are truncated (path components on
-    /// every real filesystem are far shorter).
+    /// Appends an entry, truncating names longer than u16::MAX bytes.
     pub fn push(&mut self, name: &str, mut entry: FileEntry) {
         let name = truncate_to_u16(name);
         entry.name_off = self.names.len() as u32;

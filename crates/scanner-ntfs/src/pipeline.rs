@@ -1,28 +1,19 @@
 //! Chunk-parallel sweep of raw $MFT bytes into a flat record table.
-//!
-//! The reader hands over buffers of whole FILE records; rayon parses them in
-//! ~1024-record tasks, each writing its slice of the shared slot table and
-//! filling a private name arena — zero locks and zero per-record heap in the
-//! hot path. Extension-record contributions become patches applied once at
-//! the end (`$ATTRIBUTE_LIST` is never parsed; a full sweep sees every
-//! extension record anyway — see plan.md).
+//! `$ATTRIBUTE_LIST` is never parsed: a full sweep sees every extension
+//! record anyway, and their facts land on the base record as patches.
 
 use mathom_core::EntryFlags;
 use rayon::prelude::*;
 
 use crate::record::{self, RecordFacts};
 
-/// `rank` value meaning "no $FILE_NAME seen".
 pub const NO_NAME: u8 = u8::MAX;
 
 const STATE_BASE: u8 = 1;
 const STATE_HAS_LOGICAL: u8 = 2;
 
-/// Records per rayon task: big enough to amortize scheduling, small enough
-/// to load-balance a 16-core sweep of a 32 MiB buffer.
 const TASK_RECORDS: usize = 1024;
 
-/// One MFT record's distilled facts, indexed by record number. 64 bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct Slot {
     pub parent_ref: u64,
@@ -55,7 +46,6 @@ impl Slot {
         state: 0,
     };
 
-    /// An in-use base record (extension records only ever patch these).
     pub fn is_base(&self) -> bool {
         self.state & STATE_BASE != 0
     }
@@ -65,14 +55,10 @@ impl Slot {
     }
 }
 
-/// The sweep's final output: the slot table plus the name arenas the slots
-/// point into.
 pub struct Table {
     pub records: Vec<Slot>,
     pub arenas: Vec<String>,
-    /// Torn/corrupt records skipped during parsing.
     pub torn: u64,
-    /// Extension-record patches whose base record wasn't live.
     pub dropped_patches: u64,
 }
 
@@ -83,8 +69,6 @@ impl Table {
     }
 }
 
-/// Live-progress deltas from one consumed buffer (approximate: extension
-/// patches land later; the final stats come from the emit phase).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ChunkCounts {
     pub files: u64,
@@ -92,8 +76,6 @@ pub struct ChunkCounts {
     pub bytes: u64,
 }
 
-/// Streaming sweep state. Feed record-aligned buffers in any order via
-/// [`Sweep::consume`], then [`Sweep::finish`] to apply extension patches.
 pub struct Sweep {
     records: Vec<Slot>,
     arenas: Vec<String>,
@@ -110,10 +92,8 @@ struct TaskOut {
 }
 
 impl Sweep {
-    /// `total_records` comes validated from `plan_mft_read` (its u32 type is
-    /// the proof). The slot table is the one allocation proportional to
-    /// disk-supplied sizes, so it's fallible: a table the machine can't hold
-    /// is an error, not an OOM abort.
+    /// Fallibly allocates the slot table — the one allocation proportional
+    /// to disk-supplied sizes (`total_records` is validated by `plan_mft_read`).
     pub fn new(total_records: u32, record_size: usize) -> Result<Self, String> {
         assert!(record_size >= 512 && record_size.is_power_of_two());
         let total = total_records as usize;
@@ -131,9 +111,6 @@ impl Sweep {
         })
     }
 
-    /// Parses one buffer of records starting at record number
-    /// `first_record`, in parallel. Buffers may arrive in any order but
-    /// must not overlap.
     pub fn consume(&mut self, first_record: usize, buf: &mut [u8]) -> ChunkCounts {
         let rs = self.record_size;
         assert!(
@@ -179,7 +156,6 @@ impl Sweep {
         counts
     }
 
-    /// Applies extension-record patches to their base records.
     pub fn finish(mut self) -> Table {
         let mut dropped = 0u64;
         for (base, patch) in std::mem::take(&mut self.patches) {
@@ -197,7 +173,6 @@ impl Sweep {
     }
 }
 
-/// Distills parsed facts into a slot (base records) or a patch (extensions).
 fn place(facts: RecordFacts, arena_idx: u32, slot: &mut Slot, out: &mut TaskOut) {
     let mut flags = facts.flags;
     if facts.is_dir {
@@ -297,8 +272,6 @@ mod tests {
 
     #[test]
     fn extension_record_data_lands_on_base() {
-        // A "big fragmented file": name in the base record, $DATA header in
-        // an extension record (the $ATTRIBUTE_LIST shape, without parsing it).
         let img = image(
             1024,
             vec![

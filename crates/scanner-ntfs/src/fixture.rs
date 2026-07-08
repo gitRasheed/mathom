@@ -1,9 +1,5 @@
-//! Hand-built NTFS byte fixtures for tests and benches: FILE records with
-//! real headers, attributes, and fixup protection, plus whole in-memory
-//! $MFT images. No runtime code path reaches this module.
+//! Hand-built NTFS byte fixtures for tests and benches.
 
-/// Builds one FILE record byte-for-byte. Attribute methods append in call
-/// order (real records keep attributes type-sorted; the parser must not care).
 #[derive(Clone, Debug)]
 pub struct RecordBuilder {
     seq: u16,
@@ -39,7 +35,6 @@ impl RecordBuilder {
         }
     }
 
-    /// A deleted record: everything intact but the in-use flag clear.
     pub fn free() -> Self {
         RecordBuilder {
             in_use: false,
@@ -52,13 +47,11 @@ impl RecordBuilder {
         self
     }
 
-    /// Marks this as an extension record of `base_no` (attribute overflow).
     pub fn extension_of(mut self, base_no: u64, base_seq: u16) -> Self {
         self.base_ref = base_no | (base_seq as u64) << 48;
         self
     }
 
-    /// $STANDARD_INFORMATION with DOS attribute flags and a FILETIME mtime.
     pub fn std_info(mut self, dos_attrs: u32, mtime_filetime: u64) -> Self {
         let mut v = vec![0u8; 0x48];
         for time_off in [0x00, 0x08, 0x10, 0x18] {
@@ -69,14 +62,12 @@ impl RecordBuilder {
         self
     }
 
-    /// $FILE_NAME linking to `parent`. Namespaces: 0 POSIX, 1 Win32, 2 DOS,
-    /// 3 Win32&DOS.
+    /// $FILE_NAME. Namespaces: 0 POSIX, 1 Win32, 2 DOS, 3 Win32&DOS.
     pub fn name(self, parent_no: u64, parent_seq: u16, namespace: u8, name: &str) -> Self {
         let units: Vec<u16> = name.encode_utf16().collect();
         self.name_utf16(parent_no, parent_seq, namespace, &units)
     }
 
-    /// Raw UTF-16 variant, for names no valid `&str` can express.
     pub fn name_utf16(
         mut self,
         parent_no: u64,
@@ -91,8 +82,8 @@ impl RecordBuilder {
         let mut v = vec![0u8; 0x42 + 2 * units.len()];
         let parent_ref = parent_no | (parent_seq as u64) << 48;
         v[0..8].copy_from_slice(&parent_ref.to_le_bytes());
-        // The duplicated sizes in $FILE_NAME are notoriously stale on real
-        // volumes; poison them so a parser trusting them fails tests.
+        // The duplicated sizes here are stale on real volumes; poison them
+        // so a parser trusting them fails tests.
         v[0x28..0x30].copy_from_slice(&0x2222u64.to_le_bytes());
         v[0x30..0x38].copy_from_slice(&0x1111u64.to_le_bytes());
         v[0x40] = units.len() as u8;
@@ -105,20 +96,18 @@ impl RecordBuilder {
         self
     }
 
-    /// Unnamed resident $DATA with the given content.
     pub fn data_resident_bytes(mut self, content: &[u8]) -> Self {
         self.attrs.push(resident_attr(0x80, 0, "", content));
         self
     }
 
-    /// Unnamed non-resident $DATA (the everyday file shape).
     pub fn data_nonresident(mut self, real: u64, alloc: u64) -> Self {
         self.attrs
             .push(nonres_attr(0x80, 0, "", 0, alloc, real, 0, None));
         self
     }
 
-    /// NTFS-compressed unnamed $DATA: `alloc` is the VCN-span allocation,
+    /// NTFS-compressed $DATA: `alloc` is the VCN-span allocation,
     /// `total_alloc` the truly backed bytes (what a parser must report).
     pub fn data_nonresident_compressed(mut self, real: u64, alloc: u64, total_alloc: u64) -> Self {
         self.attrs.push(nonres_attr(
@@ -134,7 +123,6 @@ impl RecordBuilder {
         self
     }
 
-    /// Sparse unnamed $DATA: `backed` is what's actually allocated.
     pub fn data_nonresident_sparse(mut self, real: u64, backed: u64) -> Self {
         self.attrs.push(nonres_attr(
             0x80,
@@ -149,8 +137,6 @@ impl RecordBuilder {
         self
     }
 
-    /// Unnamed non-resident $DATA with a caller-supplied run list — the
-    /// record-0 ($MFT self-description) shape.
     pub fn data_nonresident_with_runs(mut self, real: u64, highest_vcn: u64, runs: &[u8]) -> Self {
         let mut a = nonres_attr(0x80, 0, "", 0, real, real, 0, None);
         a[24..32].copy_from_slice(&highest_vcn.to_le_bytes());
@@ -164,15 +150,13 @@ impl RecordBuilder {
         self
     }
 
-    /// A named stream (ADS), non-resident.
     pub fn named_data_nonresident(mut self, stream: &str, real: u64, alloc: u64) -> Self {
         self.attrs
             .push(nonres_attr(0x80, 0, stream, 0, alloc, real, 0, None));
         self
     }
 
-    /// A continuation fragment (lowest VCN > 0) as found in extension
-    /// records of heavily fragmented files. Sizes here are poison values —
+    /// Continuation fragment (lowest VCN > 0); its sizes are poison values —
     /// only the VCN-0 fragment's sizes are real.
     pub fn data_continuation(mut self, lowest_vcn: u64) -> Self {
         self.attrs.push(nonres_attr(
@@ -181,7 +165,6 @@ impl RecordBuilder {
         self
     }
 
-    /// $REPARSE_POINT with the given tag.
     pub fn reparse(mut self, tag: u32) -> Self {
         let mut v = vec![0u8; 8];
         v[0..4].copy_from_slice(&tag.to_le_bytes());
@@ -189,9 +172,7 @@ impl RecordBuilder {
         self
     }
 
-    /// A well-formed $ATTRIBUTE_LIST the parser must skip by design.
     pub fn attribute_list_stub(mut self) -> Self {
-        // One list entry: type 0x10 in record 30 (arbitrary but valid shape).
         let mut v = vec![0u8; 32];
         v[0..4].copy_from_slice(&0x10u32.to_le_bytes());
         v[4..6].copy_from_slice(&32u16.to_le_bytes()); // entry length
@@ -201,7 +182,6 @@ impl RecordBuilder {
         self
     }
 
-    /// Assembles the record: header, attributes, end marker, then fixups.
     pub fn build(&self, record_no: u64, record_size: usize) -> Vec<u8> {
         assert!(record_size >= 512 && record_size.is_power_of_two());
         let mut rec = vec![0u8; record_size];
@@ -238,7 +218,6 @@ impl RecordBuilder {
         pos += 4;
         rec[0x18..0x1C].copy_from_slice(&(pos as u32).to_le_bytes());
 
-        // Fixup protection: save each sector's last word, stamp the USN.
         let usn = (self.seq | 0x4B00).to_le_bytes();
         rec[usa_off..usa_off + 2].copy_from_slice(&usn);
         for i in 1..usa_count as usize {
@@ -252,8 +231,6 @@ impl RecordBuilder {
     }
 }
 
-/// A contiguous in-memory $MFT image: record N lives at byte N×record_size;
-/// unmentioned slots stay zeroed (never-used records).
 pub fn image(record_size: usize, records: Vec<(u64, RecordBuilder)>) -> Vec<u8> {
     let max = records.iter().map(|(n, _)| *n).max().unwrap_or(0);
     let mut img = vec![0u8; (max as usize + 1) * record_size];
@@ -264,8 +241,6 @@ pub fn image(record_size: usize, records: Vec<(u64, RecordBuilder)>) -> Vec<u8> 
     img
 }
 
-/// The volume root (record 5): a directory named "." parented to itself,
-/// with the HIDDEN|SYSTEM attributes a real root carries.
 pub fn root_dir() -> RecordBuilder {
     RecordBuilder::dir()
         .seq(5)

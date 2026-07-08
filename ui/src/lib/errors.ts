@@ -1,6 +1,4 @@
-// Single funnel for backend failures. Expected races (a query landing after
-// a newer scan superseded it) stay silent; everything else logs and flashes
-// in the status bar via the single subscriber (App).
+// Single funnel for backend failures; stale-generation races stay silent.
 
 type Listener = (message: string) => void;
 

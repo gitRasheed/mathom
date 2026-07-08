@@ -1,10 +1,4 @@
-//! `MftScanner`: the `Scanner`-trait backend that reads the raw $MFT.
-//!
-//! Pipeline: a reader thread streams the $MFT's extents into a small ring
-//! of aligned buffers (next read in flight while the previous buffer
-//! parses); the scan thread sweeps each buffer with rayon, then assembles
-//! and emits batches. Same `ScanEvent` contract as the generic walker —
-//! the UI never learns which backend ran.
+//! Raw-$MFT `Scanner` backend.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,7 +13,7 @@ use crate::pipeline::Sweep;
 use crate::volume::{AlignedBuf, MftMap, Volume, is_ntfs, locate, map_mft};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
-/// 16 MiB per read: a multiple of every record/cluster size, big enough to
+/// Per read: a multiple of every record/cluster size, big enough to
 /// saturate NVMe sequential reads.
 const BUF_BYTES: usize = 16 * 1024 * 1024;
 /// Buffers in flight: one being read, one being parsed, two queued.
@@ -28,8 +22,6 @@ const POOL: usize = 4;
 pub struct MftScanner;
 
 impl MftScanner {
-    /// Cheap availability gate: NTFS volume + openable raw-volume handle
-    /// (elevation) + sane geometry. `None` means "use the generic walker".
     pub fn probe(root: &Path) -> Option<MftScanner> {
         let loc = locate(root).ok()?;
         if !is_ntfs(&loc.mount) {

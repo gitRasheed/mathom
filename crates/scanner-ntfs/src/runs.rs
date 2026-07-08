@@ -1,24 +1,17 @@
 //! Data-run decoding for non-resident attributes.
-//!
-//! Only used to locate the $MFT itself (record 0's $DATA runs) — file sizes
-//! come straight from attribute headers, never from runs.
 
 use crate::ParseError;
 
-/// One contiguous stretch of an attribute's data on disk, in clusters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Extent {
     pub lcn: u64,
     pub clusters: u64,
 }
 
-/// Decodes a run list into absolute extents.
-///
-/// Each run is `[header][length bytes][offset bytes]` where the header's low
-/// nibble is the length field width and the high nibble the offset field
-/// width; offsets are signed deltas from the previous run's LCN; a zero
-/// header terminates. Sparse runs (offset width 0) are rejected — the $MFT
-/// is never sparse.
+/// Decodes an NTFS run list into absolute extents. Each run is
+/// `[header][length][offset]` (header nibbles = field widths); offsets are
+/// signed deltas from the previous LCN; a zero header terminates. Sparse
+/// runs (offset width 0) are rejected — the $MFT is never sparse.
 pub fn decode_runs(data: &[u8]) -> Result<Vec<Extent>, ParseError> {
     let mut extents = Vec::new();
     let mut pos = 0usize;
@@ -64,7 +57,6 @@ pub fn decode_runs(data: &[u8]) -> Result<Vec<Extent>, ParseError> {
     Err(ParseError("run list missing terminator"))
 }
 
-/// Little-endian unsigned int of 1..=8 bytes.
 fn uint_le(bytes: &[u8]) -> u64 {
     let mut v = 0u64;
     for (i, &b) in bytes.iter().enumerate() {
@@ -73,7 +65,6 @@ fn uint_le(bytes: &[u8]) -> u64 {
     v
 }
 
-/// Little-endian signed int of 1..=8 bytes (sign-extended).
 fn int_le(bytes: &[u8]) -> i64 {
     let mut v = uint_le(bytes);
     let bits = 8 * bytes.len();

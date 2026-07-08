@@ -1,6 +1,5 @@
-//! Scan-wide search: parse the query-box text into filters, walk the tree,
-//! return the largest matches. Pure queries over the arena, like stats.rs;
-//! a linear walk over ~2M nodes is a few milliseconds — no index.
+//! Scan-wide search over the arena tree. A linear walk over ~2M nodes is
+//! a few milliseconds — deliberately no index.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -11,19 +10,14 @@ use crate::tree::{NodeId, Tree};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchQuery {
-    /// Lowercased; every term must appear in the name (case-insensitive).
     pub name_terms: Vec<String>,
-    /// Lowercased extension without the dot; matches files only.
+    /// Lowercased extension without the dot.
     pub ext: Option<String>,
     pub min_size: u64,
 }
 
 impl SearchQuery {
-    /// Grammar: whitespace-separated tokens. `ext:pdf` (or `ext:.pdf`)
-    /// filters by extension; `>100mb` / `>=1.5gb` sets a minimum size
-    /// (units b/kb/mb/gb/tb, 1024-based, bare number = bytes); every other
-    /// token is a name substring, all ANDed. Unparseable size tokens fall
-    /// back to name terms — a query never errors.
+    /// Tokens: name terms, `ext:pdf`, and `>100mb`/`>=1.5gb` size filters.
     pub fn parse(text: &str) -> SearchQuery {
         let mut q = SearchQuery::default();
         for token in text.split_whitespace() {
@@ -38,7 +32,6 @@ impl SearchQuery {
         q
     }
 
-    /// An empty query matches nothing (not everything).
     pub fn is_empty(&self) -> bool {
         self.name_terms.is_empty() && self.ext.is_none() && self.min_size == 0
     }
@@ -46,14 +39,13 @@ impl SearchQuery {
 
 #[derive(Clone, Debug, Default)]
 pub struct SearchResults {
-    /// The largest matches, size descending (id breaks ties), at most `cap`.
+    /// The largest matches, size descending, at most `cap`.
     pub ids: Vec<NodeId>,
     /// Every match in the tree, not just the returned ones.
     pub total_matches: u64,
 }
 
-/// Searches the whole tree (files and directories; the scan root itself is
-/// never a hit). `hide_system` prunes SYSTEM subtrees like every other query.
+/// Searches the whole tree; the scan root itself is never a hit.
 pub fn search(tree: &Tree, query: &SearchQuery, cap: usize, hide_system: bool) -> SearchResults {
     if query.is_empty() || tree.is_empty() {
         return SearchResults::default();
@@ -103,8 +95,7 @@ fn matches(tree: &Tree, id: NodeId, q: &SearchQuery) -> bool {
     q.name_terms.iter().all(|t| contains_ci(name, t))
 }
 
-/// ASCII-case-insensitive substring; `needle` must already be lowercased.
-/// Non-ASCII needle bytes match exactly — right for filenames.
+/// ASCII-case-insensitive substring; non-ASCII bytes match exactly.
 fn contains_ci(haystack: &str, needle: &str) -> bool {
     let (h, n) = (haystack.as_bytes(), needle.as_bytes());
     if n.is_empty() {
@@ -113,8 +104,7 @@ fn contains_ci(haystack: &str, needle: &str) -> bool {
     n.len() <= h.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
 }
 
-/// `>100mb` / `>=1.5gb` / `>4096` → minimum size in bytes; None if the
-/// token isn't a size filter.
+/// `>100mb` / `>=1.5gb` / `>4096` → bytes; `None` if not a size filter.
 fn parse_min_size(token: &str) -> Option<u64> {
     let rest = token
         .strip_prefix(">=")

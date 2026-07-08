@@ -1,23 +1,12 @@
-// Canvas treemap. Rendering strategy (see ARCHITECTURE.md):
-// - Rust ships a flat rect list (parents before children = painter's order).
-// - The full map is baked once per layout into an offscreen canvas — fills
-//   batched by category color, edges snapped to device pixels (1-device-px
-//   gaps instead of strokes), one stretched highlight sprite per leaf as a
-//   cheap cushion approximation — then blitted. Hover/selection outlines
-//   live on a separate overlay canvas so mousemove never rebakes.
+// Canvas treemap. Bake layout once, draw hover/selection on an overlay.
+// The rect list arrives parents-before-children: forward = paint order,
+// reverse = deepest-first hit-testing.
 //
-// Interaction model: the view root is CONTROLLED by App (`rootId`), which
-// derives it from the selection. This component only reports intent:
-// onSelect (tile clicked), onHover (tree-row sync), onNavigate (breadcrumb
-// and zoom gestures).
-//
-// IMPORTANT invariant: every callback in the canvas pipeline (drawOverlay →
-// blit → bake → fetchLayout → drillTo) is identity-stable — props they need
-// are mirrored into refs each render. A previous version let drawOverlay
-// depend on `hoveredId`, which cascaded into the reset/resize effects and
-// made every hover wipe the canvas and refetch the full layout (IPC flood,
-// webview crashes). Effects below must only depend on values whose change
-// genuinely requires that effect.
+// INVARIANT: pipeline callbacks stay identity-stable; prop values are
+// mirrored into refs, and effects depend only on values whose change
+// genuinely requires them. A hover-dependent callback once cascaded into
+// the reset/resize effects — every hover refetched the layout (IPC flood,
+// webview crash).
 
 import {
   Fragment,
@@ -85,20 +74,15 @@ interface TooltipData {
 export interface TreemapProps {
   snapshot: Snapshot | null;
   generation: number;
-  /** View root — controlled by App, derived from the selection. */
   rootId: number;
   /** Bumped by App on an out-of-band tree change (a delete) to force relayout. */
   revision: number;
-  /** Hide OS/system entries; forwarded to the layout query. */
   hideSystem: boolean;
   selected: number | null;
-  /** Node hovered in the tree pane — outlined here when visible. */
   hoveredId: number | null;
   onSelect: (rect: TreemapRect) => void;
   onHover: (id: number | null) => void;
-  /** Request a different view root (breadcrumb, zoom in/out gestures). */
   onNavigate: (id: number) => void;
-  /** Right-click on a tile: (id, viewport clientX/clientY). */
   onContext: (id: number, x: number, y: number) => void;
 }
 
@@ -124,14 +108,9 @@ export function Treemap({
   const byIdRef = useRef<Map<number, TreemapRect>>(new Map());
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
   const rootIdRef = useRef(0);
-  // Between drill start and the new layout landing, the rect list describes
-  // the OLD view — clicks/hover against it would hit stale geometry.
+  // During drill, old rects are stale geometry.
   const hitFrozenRef = useRef(false);
-  // Root the current crumbs belong to; names are immutable, so crumbs only
-  // need refetching when the view root changes (not on every tick).
   const crumbsRootRef = useRef<number | null>(null);
-  // Ancestor ids of the view root (crumbs, view root included): hovering one
-  // of these tree rows means "the whole view is inside this folder".
   const crumbIdsRef = useRef<Set<number>>(new Set());
   const lastFetchRef = useRef(0);
   const fetchSeqRef = useRef(0);
@@ -141,7 +120,6 @@ export function Treemap({
   const tooltipTimerRef = useRef(0);
   const lastMouseRef = useRef({ x: 0, y: 0 });
 
-  // Prop mirrors so the pipeline callbacks stay identity-stable.
   const generationRef = useRef(generation);
   generationRef.current = generation;
   const selectedRef = useRef(selected);
@@ -160,13 +138,9 @@ export function Treemap({
     if (!overlay) return;
     const ctx = overlay.getContext("2d")!;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
-    // Between drill start and the new layout landing, the rect list is the
-    // OLD view — rings would land on the wrong tiles over the zoom
-    // animation. fetchLayout redraws on arrival (bake → blit → here).
     if (hitFrozenRef.current) return;
     const dpr = window.devicePixelRatio || 1;
     const outline = (id: number | null, color: string, width: number) => {
-      // The view root fills the canvas; a persistent outline is pure noise.
       if (id === null || id === rootIdRef.current) return;
       const r = byIdRef.current.get(id);
       if (!r) return;
@@ -184,8 +158,6 @@ export function Treemap({
     const hovered = hoveredIdRef.current;
     if (hovered !== null && hovered !== selectedRef.current) {
       if (hovered === rootIdRef.current || crumbIdsRef.current.has(hovered)) {
-        // Hovering the view root's row (or an ancestor of it): everything on
-        // screen is inside that folder, so answer with a whole-view ring.
         ctx.strokeStyle = "#2dd4bf";
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, overlay.width - 3, overlay.height - 3);
@@ -201,9 +173,6 @@ export function Treemap({
     if (!base || !off || off.width === 0 || off.height === 0) return;
     const ctx = base.getContext("2d")!;
     ctx.clearRect(0, 0, base.width, base.height);
-    // Scaled draw: a plain copy when sizes match (the usual case), and
-    // during a pane resize it stretches the old bitmap to the new size —
-    // no crop-jump frame between the resize and the relayout landing.
     ctx.drawImage(
       off,
       0,
@@ -235,7 +204,6 @@ export function Treemap({
     ctx.fillStyle = "#0f1115";
     ctx.fillRect(0, 0, off.width, off.height);
 
-    // Pass 1: directory plates (all one color, order-independent).
     ctx.fillStyle = PALETTE[0];
     ctx.beginPath();
     for (const r of rects) {
@@ -245,7 +213,6 @@ export function Treemap({
     }
     ctx.fill();
 
-    // Pass 2: leaves batched by category (leaves never overlap each other).
     const buckets: TreemapRect[][] = PALETTE.map(() => []);
     for (const r of rects) {
       if (!r.isDir) buckets[r.category]?.push(r);
@@ -262,7 +229,6 @@ export function Treemap({
       ctx.fill();
     }
 
-    // Pass 3: cushion-ish highlight, one stretched sprite per visible leaf.
     const sprite = getHighlightSprite();
     for (const r of rects) {
       if (r.isDir) continue;
@@ -286,8 +252,7 @@ export function Treemap({
         drawOverlay(); // the current hover may have just become an ancestor
       })
       .catch((e) => {
-        // "unknown node" is expected while the tree is still empty at scan
-        // start; fetchLayout retries crumbs on its next success.
+        // The tree can still be empty at scan start; layout retries crumbs.
         if (!isStale(e) && !String(e).includes("unknown node")) {
           reportUnlessStale("loading breadcrumbs", e);
         }
@@ -342,8 +307,6 @@ export function Treemap({
       mouseOverRef.current = null;
       drawOverlay(); // clear rings: they describe the view being left
 
-      // Bitmap zoom toward the target's old rect while the layout loads;
-      // navigating to something not in view (breadcrumb, tree) swaps flat.
       const base = baseRef.current;
       const off = offscreenRef.current;
       if (zoomFrom && zoomFrom.isDir && base && off) {
@@ -380,13 +343,10 @@ export function Treemap({
     [blit, drawOverlay, fetchLayout],
   );
 
-  // The view root is controlled: App changed it (selection / navigation).
   useEffect(() => {
     drillTo(rootId);
   }, [rootId, drillTo]);
 
-  // New scan: reset drill state and clear the canvas. `drillTo`/`fetchLayout`
-  // are identity-stable, so this runs only on real generation changes.
   useEffect(() => {
     rootIdRef.current = 0;
     rectsRef.current = [];
@@ -404,27 +364,19 @@ export function Treemap({
     if (generation !== 0) void fetchLayout();
   }, [generation, fetchLayout]);
 
-  // Selection / cross-pane hover changed: redraw the two outlines, nothing else.
   useEffect(() => {
     drawOverlay();
   }, [selected, hoveredId, drawOverlay]);
 
-  // A delete (or other out-of-band tree change) bumps `revision`; relayout so
-  // the removed tile disappears. fetchLayout is identity-stable (see header),
-  // so this only fires on a real revision change, not on every render.
   useEffect(() => {
     if (revision === 0) return;
     void fetchLayout();
   }, [revision, fetchLayout]);
 
-  // Hide-system filter toggled: relayout with the new filter. (At mount
-  // generation is 0 so fetchLayout no-ops; real toggles happen mid-scan.)
   useEffect(() => {
     void fetchLayout();
   }, [hideSystem, fetchLayout]);
 
-  // Live scan: refetch layout on ticks, throttled; always refetch on the
-  // final (done/cancelled) snapshot.
   const prevStateRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!snapshot || snapshot.generation !== generation) return;
@@ -439,8 +391,6 @@ export function Treemap({
     }
   }, [snapshot, generation, fetchLayout]);
 
-  // Resize: mount-once observer; re-blit the old bitmap immediately so the
-  // pane never goes blank while the relayout is fetched.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -474,7 +424,6 @@ export function Treemap({
     (cssX: number, cssY: number): TreemapRect | null => {
       if (hitFrozenRef.current) return null;
       const rects = rectsRef.current;
-      // Reverse iteration = deepest-first (parents are emitted before children).
       for (let i = rects.length - 1; i >= 0; i--) {
         const r = rects[i];
         if (
@@ -491,7 +440,6 @@ export function Treemap({
     [],
   );
 
-  /// The depth-1 directory under the point: what the zoom gestures target.
   const regionAt = useCallback(
     (cssX: number, cssY: number): TreemapRect | null => {
       if (hitFrozenRef.current) return null;
@@ -512,10 +460,8 @@ export function Treemap({
     [],
   );
 
-  // Positions the tooltip at the last cursor position. Needed outside
-  // mousemove too: the div mounts only after the debounce + fetch, usually
-  // with the cursor already at rest — without a mount-time placement it
-  // renders at its default (0,0), the pane's top-left corner.
+  // Also called at mount: the div appears after the debounce with the cursor
+  // already at rest, and would otherwise render at (0,0).
   const placeTooltip = useCallback(() => {
     const container = containerRef.current;
     const tip = tooltipRef.current;
@@ -547,8 +493,6 @@ export function Treemap({
       mouseOverRef.current = id;
       onHover(id);
 
-      // Tooltip content only after the cursor settles — spam-hovering must
-      // not flood IPC with getNode/getPath calls.
       window.clearTimeout(tooltipTimerRef.current);
       tooltipSeqRef.current++;
       if (id === null) {
@@ -570,7 +514,6 @@ export function Treemap({
               path,
             });
           })
-          // Cosmetic path: a missed tooltip isn't worth a flash.
           .catch(() => {});
       }, TOOLTIP_DELAY_MS);
     },
@@ -604,8 +547,6 @@ export function Treemap({
     [hitTest, onContext],
   );
 
-  // Zoom into the top-level folder under the cursor — works anywhere in its
-  // region, no need to hit a (mostly covered) directory tile.
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       if (zoomRafRef.current !== 0) return;

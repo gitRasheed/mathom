@@ -1,9 +1,4 @@
 //! Arena tree with streaming aggregation.
-//!
-//! Nodes live in one `Vec<Node>` indexed by the scanner-assigned `path_id`,
-//! names are interned, children form intrusive singly-linked lists. Directory
-//! aggregates (size/allocated/items) update incrementally as batches arrive,
-//! so the tree is queryable mid-scan for live UI snapshots.
 
 use crate::entry::{EntryBatch, EntryFlags};
 use crate::interner::{NameInterner, NameRef};
@@ -12,10 +7,7 @@ pub type NodeId = u32;
 
 const NONE: u32 = u32::MAX;
 
-/// 48 bytes. Directories carry aggregates in `size`/`allocated`/`items`;
-/// files carry their own size and `items == 0`.
-/// (`name_off`/`name_len` are inlined rather than a `NameRef` field so they
-/// pack with `flags` into one word.)
+/// 48 bytes; directories carry aggregates, files carry their own size.
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
     name_off: u32,
@@ -24,7 +16,7 @@ pub struct Node {
     parent: u32,
     first_child: u32,
     next_sibling: u32,
-    /// Directories: total descendant count (files + dirs). Files: 0.
+    /// Directories: descendant count. Files: 0.
     pub items: u32,
     pub size: u64,
     pub allocated: u64,
@@ -65,7 +57,6 @@ impl Node {
     }
 }
 
-/// Totals freed by `Tree::remove_subtree`, for updating running counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Removed {
     pub size: u64,
@@ -75,7 +66,6 @@ pub struct Removed {
 }
 
 impl Removed {
-    /// Arena nodes detached (files + dirs).
     pub fn nodes(&self) -> u64 {
         self.files + self.dirs
     }
@@ -109,11 +99,8 @@ impl Tree {
         &self.nodes[id as usize]
     }
 
-    /// Whether `id` refers to a node currently part of the tree: in range and
-    /// either the root or still linked to a parent. Ids from outside (the UI)
-    /// can be stale — pointing at slots vacated by [`Tree::remove_subtree`] or
-    /// never filled at all — and must pass this before the slot is trusted.
-    /// (Not `is_vacant`: a childless root has the same all-NONE link shape.)
+    /// True for nodes currently linked into the tree; stale UI ids fail.
+    /// (Not `is_vacant`: a childless root has the same all-NONE links.)
     pub fn is_live(&self, id: NodeId) -> bool {
         match self.nodes.get(id as usize) {
             Some(n) => id == Self::ROOT || n.parent != NONE,
@@ -132,8 +119,6 @@ impl Tree {
         }
     }
 
-    /// Rebuilds the full path by walking parents up to the root. The root's
-    /// own name is the scan root path as given to the scanner.
     pub fn path(&self, mut id: NodeId) -> String {
         let mut parts = vec![self.name(id)];
         while let Some(p) = self.node(id).parent() {
@@ -154,26 +139,17 @@ impl Tree {
         self.names.bytes_used()
     }
 
-    /// Removes the subtree rooted at `id`: unlinks it from its parent, subtracts
-    /// its aggregates from every ancestor, and vacates its arena slots. Mirrors
-    /// a filesystem delete so the tree stays consistent without a rescan.
-    ///
-    /// Returns the freed totals, or `None` if `id` is out of range, the root,
-    /// or already detached. Interned names are not reclaimed (append-only
-    /// buffer); a handful of leaked names per delete is negligible.
+    /// Removes a subtree after a filesystem delete and returns freed totals.
     pub fn remove_subtree(&mut self, id: NodeId) -> Option<Removed> {
         let idx = id as usize;
         if idx >= self.nodes.len() {
             return None;
         }
         let parent = self.nodes[idx].parent;
-        // Root and already-detached nodes both have parent == NONE.
         if parent == NONE {
             return None;
         }
 
-        // Unlink `id` from the parent's singly-linked child list. Capture the
-        // successor before detach_subtree vacates the node.
         let next = self.nodes[idx].next_sibling;
         if self.nodes[parent as usize].first_child == id {
             self.nodes[parent as usize].first_child = next;
@@ -191,7 +167,6 @@ impl Tree {
 
         let removed = self.detach_subtree(id);
 
-        // Subtract the freed aggregates from the parent up to the root.
         let node_count = removed.nodes() as u32;
         let mut anc = parent;
         loop {
@@ -207,10 +182,7 @@ impl Tree {
         Some(removed)
     }
 
-    /// Walks the subtree rooted at `id`, tallying files/dirs/bytes and marking
-    /// every node vacant. Iterative (explicit stack) to bound stack depth on
-    /// deep trees. `size`/`allocated` sum leaf values only, since a directory's
-    /// aggregate is exactly the sum of its leaves.
+    /// Iteratively vacates the subtree and tallies leaf bytes.
     fn detach_subtree(&mut self, id: NodeId) -> Removed {
         let mut removed = Removed::default();
         let mut stack = vec![id];
@@ -253,10 +225,8 @@ impl Iterator for ChildIter<'_> {
 }
 
 /// Consumes scanner batches and maintains the tree incrementally.
-///
-/// Contract with the scanner: an entry's parent was emitted in an earlier
-/// batch (or earlier in the same batch); the root is entry 0 with
-/// `parent_id == 0`. Sibling batches may arrive in any order.
+/// Scanner contract: a parent entry is emitted before its children (root is
+/// entry 0 with `parent_id == 0`); sibling batches may arrive in any order.
 #[derive(Default)]
 pub struct TreeBuilder {
     tree: Tree,
@@ -309,27 +279,20 @@ impl TreeBuilder {
         }
     }
 
-    /// Marks a directory as unreadable (its children never arrive).
     pub fn mark_error(&mut self, id: NodeId) {
         if let Some(n) = self.tree.nodes.get_mut(id as usize) {
             n.flags.insert(EntryFlags::ERROR);
         }
     }
 
-    /// Removes a node's subtree from the live tree after a filesystem delete.
-    /// Delegates to [`Tree::remove_subtree`]; returns the freed totals.
     pub fn remove(&mut self, id: NodeId) -> Option<Removed> {
         self.tree.remove_subtree(id)
     }
 
-    /// Live view for mid-scan snapshots.
     pub fn tree(&self) -> &Tree {
         &self.tree
     }
 
-    /// Cancelled scans may leave vacant slots (ids allocated by the scanner
-    /// whose batches never arrived); those are unreachable from the root and
-    /// harmless.
     pub fn finish(self) -> Tree {
         self.tree
     }
@@ -377,7 +340,7 @@ mod tests {
     const DIR: EntryFlags = EntryFlags::DIR;
     const FILE: EntryFlags = EntryFlags(0);
 
-    /// root(0) / a(1) / sub(3), files: f1(2, 100B) in a, f2(4, 7B) in sub, f3(5, 1B) in root
+    /// root(0) / a(1) / sub(3); files: f1(2)=100 in a, f2(4)=7 in sub, f3(5)=1 in root
     fn build_sample(batch_order: &[&[(&str, FileEntry)]]) -> Tree {
         let mut builder = TreeBuilder::new();
         for items in batch_order {
@@ -416,8 +379,6 @@ mod tests {
     fn sibling_batches_may_arrive_in_any_order() {
         let mut builder = TreeBuilder::new();
         builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
-        // Two sibling dirs emitted together, their child batches arrive
-        // in reverse id order — allowed.
         builder.add_batch(&batch(&[
             ("a", entry(1, 0, DIR, 0)),
             ("b", entry(2, 0, DIR, 0)),
@@ -486,7 +447,6 @@ mod tests {
     #[test]
     fn remove_subtree_frees_dir_and_updates_ancestors() {
         let mut tree = sample_tree();
-        // Freed total equals the dir's own aggregate before removal.
         assert_eq!(tree.node(1).size, 107);
 
         let removed = tree.remove_subtree(1).unwrap();
@@ -501,12 +461,10 @@ mod tests {
         );
         assert_eq!(removed.nodes(), 4);
 
-        // Root drops the whole subtree: 108-107 bytes, 5-4 items.
         assert_eq!(tree.node(0).size, 1);
         assert_eq!(tree.node(0).items, 1);
         assert_eq!(child_ids(&tree, 0), vec![5]);
 
-        // The detached node is vacated.
         assert!(tree.node(1).parent().is_none());
         assert!(!tree.node(1).is_dir());
     }
@@ -514,7 +472,6 @@ mod tests {
     #[test]
     fn remove_leaf_updates_ancestors_and_relinks_head() {
         let mut tree = sample_tree();
-        // f3 is the head of root's child list; removing it relinks first_child.
         let removed = tree.remove_subtree(5).unwrap();
         assert_eq!(
             removed,
@@ -537,7 +494,6 @@ mod tests {
         assert_eq!(removed.nodes(), 2);
         assert_eq!(removed.size, 7);
 
-        // Both a and root shrink; a's child list loses "sub".
         assert_eq!(tree.node(1).size, 100);
         assert_eq!(tree.node(1).items, 1);
         assert_eq!(tree.node(0).size, 101);
@@ -550,7 +506,6 @@ mod tests {
         let mut tree = sample_tree();
         assert_eq!(tree.remove_subtree(0), None);
         assert_eq!(tree.remove_subtree(99), None);
-        // Nothing changed.
         assert_eq!(tree.node(0).size, 108);
         assert_eq!(tree.node(0).items, 5);
     }
@@ -560,7 +515,6 @@ mod tests {
         let mut tree = sample_tree();
         assert!(tree.remove_subtree(3).is_some());
         let root_size = tree.node(0).size;
-        // The slot is now detached; a second remove is a no-op.
         assert_eq!(tree.remove_subtree(3), None);
         assert_eq!(tree.node(0).size, root_size);
     }
@@ -570,18 +524,16 @@ mod tests {
         let mut tree = sample_tree();
         tree.remove_subtree(1).unwrap();
 
-        assert!(!tree.is_live(1)); // the removed dir itself
-        assert!(!tree.is_live(2)); // a file that was inside it
-        assert!(!tree.is_live(3)); // a dir that was inside it
-        assert!(!tree.is_live(99)); // out of range
-        assert!(tree.is_live(0)); // root untouched
-        assert!(tree.is_live(5)); // untouched sibling
+        assert!(!tree.is_live(1));
+        assert!(!tree.is_live(2));
+        assert!(!tree.is_live(3));
+        assert!(!tree.is_live(99));
+        assert!(tree.is_live(0));
+        assert!(tree.is_live(5));
     }
 
     #[test]
     fn is_live_accepts_childless_root() {
-        // A root with no children yet has all links == NONE, the same shape
-        // as a vacant slot — it must still count as live.
         let mut builder = TreeBuilder::new();
         builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
         let tree = builder.finish();
@@ -591,8 +543,6 @@ mod tests {
 
     #[test]
     fn is_live_rejects_never_filled_gap_slots() {
-        // A cancelled scan can allocate ids whose batches never arrive:
-        // entry 2 forces slot 1 into existence as a vacant placeholder.
         let mut builder = TreeBuilder::new();
         builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
         builder.add_batch(&batch(&[("f", entry(2, 0, FILE, 5))]));

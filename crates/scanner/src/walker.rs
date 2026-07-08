@@ -1,9 +1,4 @@
-//! Generic parallel walker: portable fallback backend built on std read_dir
-//! plus a rayon scope (one task per directory, work-stealing).
-//!
-//! Ordering invariant relied on by `TreeBuilder`: a directory's children are
-//! fully sent to the channel *before* its subdirectories are spawned, so a
-//! parent entry is always received before any of its children.
+//! Generic parallel fallback walker.
 
 use std::fs;
 use std::path::PathBuf;
@@ -43,8 +38,6 @@ impl Ctx {
         self.cancel.load(Ordering::Relaxed)
     }
 
-    /// Sends an event; on failure (receiver gone) flips cancel so all
-    /// workers wind down.
     fn send(&self, event: ScanEvent) -> bool {
         if self.tx.send(event).is_err() {
             self.cancel.store(true, Ordering::Relaxed);
@@ -120,10 +113,7 @@ fn run_scan(options: ScanOptions, tx: Sender<ScanEvent>, cancel: Arc<AtomicBool>
 
     let ticker = spawn_progress_ticker(Arc::clone(&ctx));
 
-    // Directory enumeration is blocking-syscall bound, not CPU bound:
-    // oversubscribing keeps the disk queue full. Measured on a 1.9M-entry
-    // NTFS volume (16 cores, warm cache): 16 threads 21.9s, 32 18.4s,
-    // 64 18.8s, 128 17.6s.
+    // Directory enumeration is blocking-syscall bound; oversubscribe modestly.
     let threads = options.threads.unwrap_or_else(|| {
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
         (cores * 4).min(64)
@@ -169,8 +159,6 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
             ctx.errors.fetch_add(1, Ordering::Relaxed);
             continue;
         };
-        // DirEntry::metadata does not traverse symlinks; on Windows it comes
-        // straight from the directory enumeration (no extra syscall).
         let Ok(meta) = dent.metadata() else {
             ctx.errors.fetch_add(1, Ordering::Relaxed);
             continue;
@@ -189,18 +177,11 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
             size = 0;
             dirs += 1;
         } else if is_reparse {
-            // Symlinks/junctions: zero-size leaf, marked, never followed.
             flags.insert(EntryFlags::REPARSE);
             size = 0;
             files += 1;
         } else {
             size = meta.len();
-            // Ordinary files: len() is the allocation, cluster rounding
-            // aside (the MFT backend reports it exactly). For attribute-
-            // flagged files len() can be off by the whole file — a
-            // dehydrated cloud placeholder allocates ~nothing — so ask for
-            // the real allocation. Path-based query, never opens for data
-            // (data opens can trigger Defender scans and cloud hydration).
             let attr_flags = allocation_flags(file_attributes(&meta));
             allocated = if attr_flags == EntryFlags(0) {
                 size
@@ -240,8 +221,7 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
         }
     }
 
-    // The ordering invariant: children hit the channel before any subdir
-    // task can send grandchildren.
+    // TreeBuilder requires parent entries before grandchildren.
     if !batch.is_empty() && !ctx.send(ScanEvent::Batch(batch)) {
         return;
     }
@@ -256,7 +236,6 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
     }
 }
 
-/// Emits `Progress` every ~100ms until the returned guard is dropped.
 fn spawn_progress_ticker(ctx: Arc<Ctx>) -> TickerGuard {
     let (stop_tx, stop_rx) = bounded::<()>(0);
     let handle = std::thread::Builder::new()
@@ -282,8 +261,7 @@ struct TickerGuard {
 
 impl Drop for TickerGuard {
     fn drop(&mut self) {
-        // Signal before joining — joining first would wait on a ticker that
-        // never learns it should stop.
+        // Signal before joining, or the join waits on a ticker that never stops.
         drop(self.stop.take());
         if let Some(h) = self.handle.take() {
             let _ = h.join();
@@ -295,7 +273,6 @@ impl Drop for TickerGuard {
 fn is_system(meta: &fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
-    // Reads the attributes already fetched with the entry — no extra syscall.
     meta.file_attributes() & FILE_ATTRIBUTE_SYSTEM != 0
 }
 
@@ -315,14 +292,9 @@ fn file_attributes(_meta: &fs::Metadata) -> u32 {
     0
 }
 
-/// Maps the Windows attribute bits under which a file's logical size
-/// misstates its on-disk allocation. Empty means `len()` can be trusted.
 fn allocation_flags(attrs: u32) -> EntryFlags {
     const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x0200;
     const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0800;
-    // The cloud-placeholder family (OneDrive & co): OFFLINE plus the two
-    // recall bits. Dehydrated files keep their full logical size but
-    // allocate almost nothing on disk.
     const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
     const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x4_0000;
     const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x40_0000;
@@ -345,9 +317,9 @@ fn allocation_flags(attrs: u32) -> EntryFlags {
     f
 }
 
-/// True on-disk allocation via `GetCompressedFileSizeW` — a path-only
-/// metadata query (no handle with data access is ever opened). `None` on
-/// failure; callers fall back to the logical size.
+/// True on-disk allocation via `GetCompressedFileSizeW` — a path-only query.
+/// Never open these files for data: that triggers Defender scans and, for
+/// cloud placeholders, hydration (mass-downloading the user's OneDrive).
 #[cfg(windows)]
 fn allocated_on_disk(path: &std::path::Path) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;
@@ -389,8 +361,6 @@ fn mtime_secs(meta: &fs::Metadata) -> i64 {
 mod tests {
     use super::*;
 
-    /// Pins the raw attribute values — a transposed bit here would silently
-    /// misclassify files (the sparse integration test covers only SPARSE).
     #[test]
     fn allocation_flags_map_the_documented_attribute_bits() {
         assert_eq!(allocation_flags(0), EntryFlags(0));

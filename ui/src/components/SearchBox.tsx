@@ -1,6 +1,4 @@
-// Toolbar search: debounced scan-wide query, results ranked by size.
-// The query grammar lives in core (mathom-core/src/search.rs); this box
-// just ships the raw text and renders the hits.
+// Raw query box; grammar lives in mathom-core/src/search.rs.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type SearchHit, type SearchResults } from "../lib/api";
@@ -33,7 +31,6 @@ export function SearchBox({
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Debounced query; a new scan or filter change requeries the same text.
   useEffect(() => {
     const seq = ++seqRef.current;
     if (generation === 0 || text.trim() === "") {
@@ -55,7 +52,6 @@ export function SearchBox({
     return () => window.clearTimeout(timer);
   }, [text, generation, hideSystem]);
 
-  // Ctrl+F focuses the box from anywhere.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key.toLowerCase() === "f") {
@@ -68,7 +64,6 @@ export function SearchBox({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Click anywhere outside closes the dropdown.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -78,7 +73,6 @@ export function SearchBox({
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Keep the active row visible while arrowing through the list.
   useEffect(() => {
     boxRef.current
       ?.querySelector(`[data-i="${active}"]`)

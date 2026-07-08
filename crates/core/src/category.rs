@@ -1,6 +1,4 @@
-//! File-type categories: the treemap color key, and later (milestone 4) the
-//! grouping for the type-breakdown panel. Kept as a small closed set — the
-//! frontend maps `Category as u8` straight into a palette array.
+//! File-type categories shared by the treemap and type panel.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -20,9 +18,7 @@ pub enum Category {
 
 pub const CATEGORY_COUNT: usize = 11;
 
-/// Inline lowercased extension, the grouping key for the type panel.
-/// Extensions are at most 8 bytes by the `extension_key` rule, so this is
-/// `Copy` and hashable with no allocation on the 2M-node walk.
+/// Inline lowercased extension, capped at 8 bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExtKey {
     len: u8,
@@ -36,9 +32,7 @@ impl ExtKey {
     }
 }
 
-/// The extension both grouping and categorization agree on: text after the
-/// last dot, non-empty, at most 8 bytes, ASCII-lowercased. `None` means the
-/// "no extension" group (and `Other` for the treemap color).
+/// Extension after the last dot, ASCII-lowercased, capped at 8 bytes.
 pub fn extension_key(name: &str) -> Option<ExtKey> {
     let dot = name.rfind('.')?;
     let ext = &name[dot + 1..];
@@ -54,8 +48,7 @@ pub fn extension_key(name: &str) -> Option<ExtKey> {
     })
 }
 
-/// Categorize by file extension (case-insensitive). Extensions cover the
-/// bulk of bytes on real disks; everything unrecognized is `Other`.
+/// Categorize by file extension; unknowns are `Other`.
 pub fn categorize(name: &str, is_dir: bool) -> Category {
     if is_dir {
         return Category::Directory;
@@ -66,11 +59,9 @@ pub fn categorize(name: &str, is_dir: bool) -> Category {
     }
 }
 
-/// Category of one extension group (files only — dirs never group).
 pub fn categorize_ext(key: &ExtKey) -> Category {
     match &key.bytes[..key.len as usize] {
-        // "ts" is ambiguous (MPEG transport stream vs TypeScript); TypeScript
-        // is by far the more common meaning, so it lives in Code below.
+        // "ts" is ambiguous (MPEG stream vs TypeScript); it lives in Code.
         b"mp4" | b"mkv" | b"avi" | b"mov" | b"wmv" | b"flv" | b"webm" | b"m4v" | b"mpg"
         | b"mpeg" | b"m2ts" | b"vob" => Category::Video,
         b"mp3" | b"flac" | b"wav" | b"aac" | b"ogg" | b"opus" | b"m4a" | b"wma" | b"mid"

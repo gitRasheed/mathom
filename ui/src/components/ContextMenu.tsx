@@ -13,9 +13,6 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
-// A lightweight custom context menu (matches the app's dark aesthetic rather
-// than the native webview menu). A transparent backdrop catches the outside
-// click / right-click that dismisses it; Escape closes it too.
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });

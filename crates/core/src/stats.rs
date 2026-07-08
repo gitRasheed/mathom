@@ -1,6 +1,4 @@
-//! Subtree statistics for the detail panel: extension breakdown and the
-//! largest files under a root. Pure queries over the arena; walks use an
-//! explicit stack (scan trees can nest thousands deep).
+//! Subtree statistics for the detail panel.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -9,7 +7,6 @@ use crate::category::{Category, ExtKey, categorize_ext, extension_key};
 use crate::entry::EntryFlags;
 use crate::tree::{NodeId, Tree};
 
-/// One extension group. `ext == None` is the "no extension" bucket.
 #[derive(Clone, Copy, Debug)]
 pub struct TypeStat {
     pub ext: Option<ExtKey>,
@@ -20,19 +17,13 @@ pub struct TypeStat {
 
 #[derive(Clone, Debug, Default)]
 pub struct TypeBreakdown {
-    /// Top groups by bytes descending (name breaks ties, for stable output).
     pub types: Vec<TypeStat>,
-    /// Everything past the top groups, folded together.
     pub other_bytes: u64,
     pub other_files: u64,
-    /// All files in the subtree — the denominators; the top groups plus the
-    /// other fold always sum to exactly these.
     pub total_bytes: u64,
     pub total_files: u64,
 }
 
-/// Groups every file under `root` by extension. `top` bounds the returned
-/// group list; the remainder lands in the other fold.
 pub fn type_breakdown(tree: &Tree, root: NodeId, top: usize, hide_system: bool) -> TypeBreakdown {
     let mut groups: HashMap<Option<ExtKey>, (u64, u64)> = HashMap::new();
     for_each_file(tree, root, hide_system, |id, size| {
@@ -71,12 +62,10 @@ pub fn type_breakdown(tree: &Tree, root: NodeId, top: usize, hide_system: bool) 
     }
 }
 
-/// The `n` largest files under `root`, size descending (id breaks ties).
 pub fn largest_files(tree: &Tree, root: NodeId, n: usize, hide_system: bool) -> Vec<NodeId> {
     if n == 0 {
         return Vec::new();
     }
-    // Bounded min-heap: the smallest of the current top-n is evicted first.
     let mut heap: BinaryHeap<Reverse<(u64, NodeId)>> = BinaryHeap::with_capacity(n + 1);
     for_each_file(tree, root, hide_system, |id, size| {
         heap.push(Reverse((size, id)));
@@ -93,9 +82,6 @@ fn ext_str(t: &TypeStat) -> &str {
     t.ext.as_ref().map_or("", |k| k.as_str())
 }
 
-/// Calls `f(id, size)` for every file under `root` (root included if it is
-/// a file). `hide_system` prunes SYSTEM subtrees/files, except the root
-/// itself — the user is explicitly looking at it.
 fn for_each_file(tree: &Tree, root: NodeId, hide_system: bool, mut f: impl FnMut(NodeId, u64)) {
     if (root as usize) >= tree.len() {
         return; // ids come from the IPC boundary; unknown roots yield nothing
@@ -136,11 +122,8 @@ mod tests {
     const DIR: EntryFlags = EntryFlags::DIR;
     const FILE: EntryFlags = EntryFlags(0);
 
-    /// root(0)
-    /// ├─ docs(1)/      a.pdf(2)=100, b.PDF(3)=50, notes(4)=8 (no extension)
-    /// ├─ media(5)/     movie.mkv(6)=500
-    /// ├─ sys(7)/ SYSTEM   pagefile.sys(8)=999
-    /// └─ raw.bin(9)=30
+    /// root(0)/docs(1): a.pdf(2)=100, b.PDF(3)=50, notes(4)=8;
+    /// media(5): movie.mkv(6)=500; sys(7)[SYSTEM]: pagefile.sys(8)=999; raw.bin(9)=30
     fn sample() -> Tree {
         let mut b = TreeBuilder::new();
         let mut batch = EntryBatch::default();

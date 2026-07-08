@@ -1,17 +1,9 @@
-//! Bridge between the channel-based scanner and the Tauri UI.
+//! Tauri bridge for scanner snapshots and tree queries.
 //!
-//! One drain thread per scan consumes `ScanEvent`s, feeds the shared
-//! `TreeBuilder`, and emits a throttled (~100ms) `scan://tick` event. The UI
-//! never receives the tree itself: it re-queries the slices it can see
-//! (`get_children` for the root + expanded directories) on each tick, so
-//! IPC payloads stay O(visible rows), not O(tree).
-//!
-//! Concurrency: the drain thread takes short write locks per batch; query
-//! commands take read locks. A monotonic `generation` identifies each scan —
-//! starting a new scan cancels the old handle, and the old drain thread keeps
-//! writing only to its own orphaned `Session` until `Done` arrives. Ticks and
-//! query results carry the generation so the UI can drop stale ones.
-//! Lock order: never hold the builder lock and the progress lock at once.
+//! The tree never crosses IPC: ticks are a throttled dirty signal and the UI
+//! re-queries only the slices it can see, so payloads stay O(visible rows).
+//! Every query carries a scan `generation` so stale answers get dropped.
+//! Lock order: never hold the builder lock and progress lock together.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,7 +20,6 @@ const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Default)]
 pub struct AppState {
-    /// Monotonic scan id, bumped on every `start_scan`.
     last_generation: AtomicU64,
     current: Mutex<Option<Arc<Session>>>,
 }
@@ -63,7 +54,6 @@ enum ScanState {
     Failed,
 }
 
-/// Payload of `scan://tick` / `scan://done` and of `scan_status`.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -74,7 +64,6 @@ pub struct Snapshot {
     bytes: u64,
     errors: u64,
     elapsed_ms: u64,
-    /// Arena length so far (>= entries received; includes vacant slots).
     nodes: usize,
     root_error: Option<String>,
 }
@@ -92,7 +81,6 @@ pub struct Row {
     has_children: bool,
     is_reparse: bool,
     is_error: bool,
-    /// Fraction of the parent directory's total size, 0..=1.
     pct: f64,
 }
 
@@ -168,9 +156,6 @@ pub fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String) -> R
     Ok(generation)
 }
 
-/// Backend selection, invisible to the UI: NTFS volume + elevation → raw
-/// MFT reader; anything else (FAT/exFAT/ReFS/network, non-elevated,
-/// unsupported geometry) → generic walker, silently.
 fn spawn_backend(root: PathBuf) -> ScanHandle {
     #[cfg(all(windows, feature = "mft-backend"))]
     if let Some(mft) = mathom_scanner_ntfs::MftScanner::probe(&root) {
@@ -204,9 +189,6 @@ pub fn scan_status(state: State<'_, AppState>) -> Snapshot {
     }
 }
 
-/// Children of each requested directory, sorted. Non-directories and ids that
-/// aren't live (not yet seen, or vacated by a delete) are silently skipped,
-/// so the UI can ask optimistically mid-scan.
 #[tauri::command]
 pub fn get_children(
     state: State<'_, AppState>,
@@ -248,7 +230,6 @@ pub fn get_node(
     if !tree.is_live(id) {
         return Ok(None);
     }
-    // Root has no parent: report pct 1.0 against itself.
     let parent_size = match tree.node(id).parent() {
         Some(p) => tree.node(p).size,
         None => tree.node(id).size,
@@ -267,9 +248,6 @@ pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Resu
     Ok(tree.path(id))
 }
 
-/// Squarified layout of the subtree under `root_id` for a `width`×`height`
-/// CSS-pixel canvas. Options are fixed here (QDirStat-informed 3px² cull,
-/// 1px nesting padding) until there's a reason to expose them.
 #[tauri::command]
 pub fn get_treemap(
     state: State<'_, AppState>,
@@ -282,9 +260,9 @@ pub fn get_treemap(
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
-    // View queries answer a stale root (deleted while a re-query was already
-    // in flight) with an empty layout, not an error: the UI re-points at the
-    // parent a frame later and an error toast would be noise.
+    // Empty, not an error: a stale view root is an expected race during
+    // deletes; the UI re-points at the parent a frame later. (get_type_stats
+    // answers the same race with "unknown node", which its caller tolerates.)
     if !tree.is_live(root_id) {
         return Ok(Vec::new());
     }
@@ -321,9 +299,7 @@ pub fn get_treemap(
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TypeStatDto {
-    /// Lowercased extension; empty string = the "no extension" group.
     ext: String,
-    /// Index into the shared category palette (same key as treemap tiles).
     category: u8,
     bytes: u64,
     files: u64,
@@ -340,8 +316,6 @@ pub struct TypePanelData {
     top_files: Vec<Row>,
 }
 
-/// Extension breakdown + largest files for the subtree under `root_id` —
-/// the detail panel's one query, scoped to the treemap's view root.
 #[tauri::command]
 pub fn get_type_stats(
     state: State<'_, AppState>,
@@ -355,8 +329,6 @@ pub fn get_type_stats(
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
-    // The panel's catch treats "unknown node" as an expected race, same as
-    // the pre-delete stale-root case — see the comment in get_treemap.
     if !tree.is_live(root_id) {
         return Err("unknown node".into());
     }
@@ -400,12 +372,9 @@ pub struct SearchHit {
 #[serde(rename_all = "camelCase")]
 pub struct SearchResultsDto {
     hits: Vec<SearchHit>,
-    /// Every match, not just the returned top slice.
     total: u64,
 }
 
-/// Scan-wide search (always the whole tree, not the treemap view root).
-/// The query-box grammar is parsed in core; an empty query returns nothing.
 #[tauri::command]
 pub fn search(
     state: State<'_, AppState>,
@@ -442,8 +411,6 @@ pub fn search(
     })
 }
 
-/// Root-first chain of ancestors, ending with the node itself. Powers the
-/// treemap breadcrumbs and "reveal in tree".
 #[tauri::command]
 pub fn get_ancestors(
     state: State<'_, AppState>,
@@ -476,12 +443,9 @@ pub fn get_ancestors(
 #[serde(rename_all = "camelCase")]
 pub struct DeletePreflight {
     path: String,
-    /// Set when policy forbids deleting this path; the UI disables confirm.
     block_reason: Option<String>,
 }
 
-/// What the delete-confirmation dialog needs before the user can commit:
-/// the resolved path, and whether policy would refuse it anyway.
 #[tauri::command]
 pub fn delete_preflight(
     state: State<'_, AppState>,
@@ -499,11 +463,6 @@ pub fn delete_preflight(
     Ok(DeletePreflight { path, block_reason })
 }
 
-/// Deletes a node's file/directory (Recycle Bin unless `permanent`), then
-/// subtracts its subtree from the live tree so the UI updates without a
-/// rescan. The blocking filesystem op runs with no tree lock held.
-/// Policy-protected paths are refused here too — the preflight is UX, not
-/// the enforcement point.
 #[tauri::command]
 pub fn delete_entry(
     app: AppHandle,
@@ -517,8 +476,6 @@ pub fn delete_entry(
     let (path, parent_id, is_dir) = {
         let builder = session.builder.read().unwrap();
         let tree = builder.tree();
-        // A vacant slot here means the id outlived a delete; without this
-        // check tree.path() would hand the fs ops an empty/garbage path.
         if !tree.is_live(id) {
             return Err("unknown item".into());
         }
@@ -529,6 +486,8 @@ pub fn delete_entry(
         (tree.path(id), node.parent(), node.is_dir())
     };
 
+    // Re-checked here even though the dialog ran the preflight — this is
+    // the enforcement point; the preflight is UX.
     if let Some(reason) = crate::protected::deletion_block_reason(&path) {
         return Err(reason);
     }
@@ -544,9 +503,6 @@ pub fn delete_entry(
         trash::delete(&path).map_err(|e| format!("{path}: {e}"))?;
     }
 
-    // The delete succeeded on disk. Reflect it in the tree if this scan still
-    // owns it; a scan started meanwhile leaves an orphaned session we can
-    // mutate harmlessly (the new scan reads the real disk anyway).
     let removed = session.builder.write().unwrap().remove(id);
     if let Some(r) = removed {
         {
@@ -567,8 +523,6 @@ pub fn delete_entry(
     })
 }
 
-/// Reveals the item in the OS file manager: folders open directly, files are
-/// selected inside their parent folder.
 #[tauri::command]
 pub fn open_in_explorer(
     state: State<'_, AppState>,
@@ -595,8 +549,8 @@ fn reveal_in_file_manager(path: &str, is_dir: bool) -> Result<(), String> {
     if is_dir {
         cmd.arg(path);
     } else {
-        // explorer's /select wants path and flag as one token; quote it via
-        // raw_arg (Command's normal escaping confuses explorer's own parser).
+        // explorer wants /select and the path as one token; raw_arg because
+        // Command's normal escaping confuses explorer's parser.
         cmd.raw_arg(format!("/select,\"{path}\""));
     }
     // explorer exits non-zero even on success; only a spawn failure matters.
@@ -629,7 +583,6 @@ fn drain(app: AppHandle, session: Arc<Session>) {
             ScanEvent::DirError { id, message } => {
                 let tree_empty = session.builder.read().unwrap().tree().is_empty();
                 if id == Tree::ROOT && tree_empty {
-                    // Root itself unreadable: the scan produced nothing.
                     let mut p = session.progress.lock().unwrap();
                     p.errors += 1;
                     p.root_error = Some(message);
@@ -651,11 +604,7 @@ fn drain(app: AppHandle, session: Arc<Session>) {
                     p.dirs = stats.dirs;
                     p.bytes = stats.bytes;
                     p.errors = stats.errors;
-                    // Time-to-ready, not the scanner's own elapsed: the
-                    // bounded channel can hold the bulk of a fast scan, so
-                    // the scanner finishes well before ingestion does. The
-                    // status bar must agree with the live timer the user
-                    // just watched.
+                    // Time-to-ready: the drain can lag the scanner on fast scans.
                     p.finished_ms = Some(session.started.elapsed().as_millis() as u64);
                     p.state = if p.root_error.is_some() {
                         ScanState::Failed
@@ -676,10 +625,7 @@ fn drain(app: AppHandle, session: Arc<Session>) {
         }
     }
 
-    // The scanner contract says Done is always the final event; the loop
-    // ending without one means the worker died in a way even its panic
-    // guard couldn't report. Fail the scan visibly instead of leaving the
-    // UI at "scanning" forever.
+    // Done is mandatory; EOF means the worker died without reporting it.
     {
         let mut p = session.progress.lock().unwrap();
         p.errors += 1;

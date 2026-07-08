@@ -33,15 +33,12 @@ export default function App() {
   const scan = useScan();
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  // What the treemap shows: the selected folder (or a file's parent folder).
   const [viewRootId, setViewRootId] = useState(0);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [revealId, setRevealId] = useState<number | null>(null);
   const [treeWidth, setTreeWidth] = useState(560);
   const [typePanelOpen, setTypePanelOpen] = useState(true);
   const [uiError, setUiError] = useState<string | null>(null);
-  // Right-click menu + delete-confirmation state, and a counter the treemap
-  // watches so it re-lays-out after an out-of-band tree mutation (a delete).
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -53,7 +50,6 @@ export default function App() {
   } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [treeRevision, setTreeRevision] = useState(0);
-  // null = not yet known; banner only renders on a definite non-elevated.
   const [elevation, setElevation] = useState<ElevationStatus | null>(null);
   const [elevationDismissed, setElevationDismissed] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
@@ -88,8 +84,6 @@ export default function App() {
     [pathOf],
   );
 
-  // Tree click: a folder becomes the treemap view; a file shows its parent
-  // folder with the file outlined.
   const handleTreeSelect = useCallback(
     (row: Row) => {
       select(row.id);
@@ -108,8 +102,6 @@ export default function App() {
     [select, generation],
   );
 
-  // Treemap click: select + reveal in the tree. Folders (rarely hit — their
-  // tiles are covered) also become the view; files never move the view.
   const handleTreemapSelect = useCallback(
     (rect: TreemapRect) => {
       select(rect.id);
@@ -126,7 +118,6 @@ export default function App() {
     [select, generation, expandMany],
   );
 
-  // Type-panel file click: select + reveal in the tree, view stays put.
   const handlePanelFileSelect = useCallback(
     (row: Row) => {
       select(row.id);
@@ -142,8 +133,6 @@ export default function App() {
     [select, generation, expandMany],
   );
 
-  // Search hit: select + reveal like a tree click — a folder becomes the
-  // treemap view, a file shows its parent folder.
   const handleSearchSelect = useCallback(
     (hit: SearchHit) => {
       select(hit.id);
@@ -165,14 +154,12 @@ export default function App() {
     [select, generation, expandMany],
   );
 
-  // Breadcrumb / zoom gestures: pure navigation, selection stays put.
   const handleNavigate = useCallback((id: number) => {
     setViewRootId(id);
   }, []);
 
   const handleRevealed = useCallback(() => setRevealId(null), []);
 
-  // Right-click (tree row or treemap tile): select it and open the menu.
   const handleContextMenu = useCallback(
     (id: number, x: number, y: number) => {
       if (generation === 0 || id === 0) return;
@@ -222,8 +209,6 @@ export default function App() {
         setSelected(null);
         setSelectedPath(null);
       }
-      // If the deleted folder was the treemap's view root, fall back to its
-      // parent; then force a relayout so the tile disappears everywhere.
       if (res.parentId != null) {
         setViewRootId((vr) => (vr === target.id ? res.parentId! : vr));
       }
@@ -235,7 +220,6 @@ export default function App() {
     }
   }, [confirm, generation, selected]);
 
-  // Delete key: recycle the selected item; Shift+Delete deletes permanently.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Delete" || confirm) return;
@@ -291,7 +275,7 @@ export default function App() {
     const startX = e.clientX;
     const startWidth = treeWidthRef.current;
     const total = splitRef.current?.clientWidth ?? window.innerWidth;
-    // 256 = the type panel's fixed width (w-64) when it's open.
+    // 256 = the type panel's fixed width (w-64) when open.
     const reserved = TREEMAP_PANE_MIN + (typePanelOpenRef.current ? 256 : 0);
     const onMove = (ev: MouseEvent) => {
       const next = Math.min(

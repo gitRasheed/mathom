@@ -1,7 +1,4 @@
-// Client half of the snapshot protocol: the backend emits a throttled
-// `scan://tick`, and this hook re-queries only the listings the UI can see
-// (root + expanded directories). Every query carries the scan generation so
-// results from a superseded scan are dropped.
+// Snapshot client: ticks refresh only visible listings and stale generations drop.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -70,8 +67,7 @@ export function useScan(): ScanController {
     });
   }, []);
 
-  // Coalesced: ticks arrive every ~100ms, but if a fetch is still in flight
-  // we remember at most one follow-up instead of stacking invokes.
+  // Coalesce ticks while a fetch is in flight.
   const refresh = useCallback(async (): Promise<void> => {
     const gen = genRef.current;
     if (gen === 0) return;
@@ -124,7 +120,6 @@ export function useScan(): ScanController {
     };
   }, [refresh]);
 
-  // Adopt an already-running scan after a frontend reload (vite HMR in dev).
   useEffect(() => {
     api
       .scanStatus()
@@ -139,7 +134,6 @@ export function useScan(): ScanController {
       .catch((e) => reportUiError("checking scan status", e));
   }, [refresh]);
 
-  // Sort or the hide-system filter changed: refetch everything visible.
   useEffect(() => {
     void refresh();
   }, [sort, hideSystem, refresh]);
@@ -154,8 +148,7 @@ export function useScan(): ScanController {
         setRootRow(null);
         setChildrenMap(new Map());
         setExpanded(new Set([0]));
-        // A tiny scan can finish before the listener knows this generation;
-        // pull the status once to close the gap.
+        // Tiny scans can finish before the listener sees this generation.
         const s = await api.scanStatus();
         if (s.generation === gen) setSnapshot(s);
         void refresh();
@@ -195,8 +188,7 @@ export function useScan(): ScanController {
 
   const expandMany = useCallback(
     (ids: number[]) => {
-      // Already-expanded dirs are kept fresh by refresh(); only fetch the
-      // newly expanded ones so selection sync doesn't refetch the world.
+      // Existing expanded dirs are kept fresh by refresh().
       const fresh = ids.filter((id) => !expandedRef.current.has(id));
       if (fresh.length === 0) return;
       const next = new Set(expandedRef.current);

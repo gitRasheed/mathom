@@ -1,12 +1,4 @@
-//! Elevation flow. Raw-MFT scans need administrator rights, so release
-//! builds request them by default at launch (UAC prompt, WizTree-style).
-//! Declining is never fatal: the app keeps running on the generic-walker
-//! fallback and the UI shows a banner with a relaunch button.
-//!
-//! `MATHOM_NO_ELEVATE=1` suppresses the launch prompt. Dev builds never
-//! auto-prompt: the relaunched process would escape the tauri-cli dev loop
-//! and lose the Vite dev server (the banner button still works there, with
-//! the same caveat).
+//! Elevation flow for the raw-MFT backend.
 
 use serde::Serialize;
 
@@ -14,8 +6,6 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct ElevationStatus {
     pub elevated: bool,
-    /// Dev builds can't usefully relaunch (the elevated instance loses the
-    /// dev server), so the UI hides the relaunch button when this is set.
     pub dev_build: bool,
 }
 
@@ -27,8 +17,6 @@ pub fn elevation_status() -> ElevationStatus {
     }
 }
 
-/// Relaunches the app elevated (UAC prompt) and exits this instance. A
-/// declined prompt returns `Err` and the app keeps running as it is.
 #[tauri::command]
 pub fn relaunch_elevated(app: tauri::AppHandle) -> Result<(), String> {
     spawn_elevated()?;
@@ -36,16 +24,15 @@ pub fn relaunch_elevated(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Call first thing in `main`: exits the process when an elevated relaunch
-/// was started, returns in every other case.
 pub fn elevate_at_launch() {
+    // Dev builds never auto-prompt: the elevated relaunch would escape the
+    // tauri-cli dev loop and lose the Vite dev server.
     if cfg!(debug_assertions) || std::env::var_os("MATHOM_NO_ELEVATE").is_some() || is_elevated() {
         return;
     }
     if spawn_elevated().is_ok() {
         std::process::exit(0);
     }
-    // Declined: continue non-elevated; the UI banner offers a retry.
 }
 
 #[cfg(windows)]
@@ -77,8 +64,6 @@ fn is_elevated() -> bool {
     }
 }
 
-/// Starts an elevated copy of this executable via the shell's `runas` verb.
-/// `Ok` means the new instance is launching and the caller should exit.
 #[cfg(windows)]
 fn spawn_elevated() -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;

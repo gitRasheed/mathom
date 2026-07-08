@@ -1,7 +1,4 @@
-//! From the swept record table to the `EntryBatch` stream: validate parent
-//! links, build a children index (counting sort — no hash maps), resolve the
-//! scan root, then emit breadth-first so every parent precedes its children
-//! (the `TreeBuilder` ordering contract).
+//! Converts the swept record table into parent-before-child `EntryBatch`es.
 
 use std::collections::VecDeque;
 
@@ -14,22 +11,16 @@ use crate::record::{ROOT_RECORD, RecordRef};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AssembleStats {
     pub files: u64,
-    /// Directories including the synthesized root entry.
     pub dirs: u64,
-    /// Σ logical sizes of emitted files.
     pub bytes: u64,
     pub allocated: u64,
     /// Live records whose parent link failed validation (missing, freed,
-    /// reused-sequence, not a directory, or self-referential).
+    /// reused sequence, not a directory, or self-referential).
     pub orphans: u64,
-    /// True when the send callback asked to stop early.
     pub cancelled: bool,
 }
 
-/// Emits the subtree at `subtree` (path components below the volume root;
-/// empty = whole volume) as batches. Entry 0 is synthesized with
-/// `root_path` as its name, like the generic walker's root. `send`
-/// returning false stops the emit (cancellation).
+/// Emits a subtree as batches; `send` returning false cancels.
 pub fn assemble(
     table: &Table,
     subtree: &[&str],
@@ -42,7 +33,6 @@ pub fn assemble(
         return Err(ParseError("volume root record missing from $MFT"));
     }
 
-    // Pass 1: validate every parent link, counting children per parent.
     let mut child_count = vec![0u32; n];
     let mut linked = vec![false; n];
     let mut orphans = 0u64;
@@ -51,7 +41,7 @@ pub fn assemble(
             continue;
         }
         if slot.rank == NO_NAME {
-            orphans += 1; // a live record no $FILE_NAME ever named
+            orphans += 1;
             continue;
         }
         let parent = RecordRef(slot.parent_ref);
@@ -69,8 +59,6 @@ pub fn assemble(
         linked[i] = true;
     }
 
-    // Pass 2: prefix-sum + scatter into one flat children array. Children
-    // end up in record-number order — deterministic output.
     let mut starts = vec![0u32; n + 1];
     for i in 0..n {
         starts[i + 1] = starts[i] + child_count[i];
@@ -86,8 +74,6 @@ pub fn assemble(
     }
     let kids = |rec: usize| &children[starts[rec] as usize..starts[rec + 1] as usize];
 
-    // Resolve the scan root by walking path components (NTFS is
-    // case-insensitive by default).
     let mut start = ROOT_RECORD as usize;
     for comp in subtree {
         start = kids(start)
@@ -102,7 +88,6 @@ pub fn assemble(
             .ok_or(ParseError("scan root not found in $MFT"))?;
     }
 
-    // Emit. Root first (name = the scan path, like the walker), then BFS.
     let mut stats = AssembleStats::default();
     let mut root_batch = EntryBatch::with_capacity(1, root_path.len());
     root_batch.push(
@@ -136,8 +121,6 @@ pub fn assemble(
             if slot.link_names > 1 {
                 flags.insert(EntryFlags::HARDLINK);
             }
-            // Junctions/symlinks are zero-size leaves, never descended —
-            // same shape the generic walker emits.
             let is_reparse = flags.contains(EntryFlags::REPARSE);
             if is_reparse {
                 flags.remove(EntryFlags::DIR);
@@ -196,8 +179,7 @@ fn is_live_dir(slot: &Slot) -> bool {
     slot.is_base() && slot.flags.is_dir() && !slot.flags.contains(EntryFlags::REPARSE)
 }
 
-/// NTFS-style case-insensitive comparison: cheap ASCII path, full Unicode
-/// simple folding as the fallback.
+/// NTFS-style case-insensitive comparison.
 fn names_equal_ci(a: &str, b: &str) -> bool {
     if a.is_ascii() && b.is_ascii() {
         return a.eq_ignore_ascii_case(b);
@@ -297,8 +279,6 @@ mod tests {
         s.finish()
     }
 
-    /// Feeds assemble's batches straight into the real TreeBuilder — its
-    /// internal assertion is the genuine parent-before-child contract check.
     fn build_tree(
         table: &Table,
         subtree: &[&str],
@@ -324,8 +304,6 @@ mod tests {
         let (builder, stats) = build_tree(&table, &[], "C:\\");
         let tree = builder.tree();
 
-        // a.txt, big.mkv, link.bin (once!), junction (reparse leaves count
-        // as files — same as the generic walker).
         assert_eq!(stats.files, 4);
         assert_eq!(stats.dirs, 2); // root, docs
         assert_eq!(stats.bytes, 1000 + (2u64 << 30) + 512);
@@ -339,12 +317,10 @@ mod tests {
         assert_eq!(tree.node(docs).size, 1000 + 512);
         assert!(child_named(&builder, docs, "a.txt").is_some());
 
-        // The hardlink lives under docs (first name in record order) only.
         let link = child_named(&builder, docs, "link.bin").unwrap();
         assert!(tree.node(link).flags.contains(EntryFlags::HARDLINK));
         assert!(child_named(&builder, 0, "link-alias.bin").is_none());
 
-        // Extension-record file got its size; junction is a zero-size leaf.
         let big = child_named(&builder, 0, "big.mkv").unwrap();
         assert_eq!(tree.node(big).size, 2 << 30);
         let junction = child_named(&builder, 0, "junction").unwrap();
@@ -352,7 +328,6 @@ mod tests {
         assert!(!tree.node(junction).is_dir());
         assert_eq!(tree.node(junction).size, 0);
 
-        // Orphans exist nowhere in the tree.
         assert!(child_named(&builder, 0, "orphan.txt").is_none());
         assert!(child_named(&builder, docs, "stale.txt").is_none());
     }

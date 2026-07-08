@@ -1,15 +1,11 @@
-//! FILE-record parsing: fixup application and the attribute walk. This is
-//! the scan's hot loop — zero heap allocation per record (names append to a
-//! caller-owned arena) and every offset/length read from disk bytes is
-//! bounds-checked before use.
+//! FILE-record parsing: fixups plus the attribute walk.
 
 use crate::ParseError;
 use mathom_core::EntryFlags;
 
-/// The volume root directory is always FILE record 5.
 pub const ROOT_RECORD: u64 = 5;
 
-/// A packed MFT reference: 48-bit record number + 16-bit sequence.
+/// Packed MFT reference: 48-bit record number + 16-bit sequence.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RecordRef(pub u64);
 
@@ -23,9 +19,6 @@ impl RecordRef {
     }
 }
 
-/// One chosen file name: where it lives in the name arena and which parent
-/// it links to. `rank` orders namespaces (Win32 best, DOS 8.3 last) so a
-/// better name replaces a worse one during the walk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NameFact {
     pub parent: RecordRef,
@@ -34,8 +27,6 @@ pub struct NameFact {
     pub len: u16,
 }
 
-/// Everything one FILE record contributes to the tree. For extension
-/// records (`base != 0`) the caller routes these facts to the base record.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RecordFacts {
     /// Base record number; 0 means this *is* a base record.
@@ -63,10 +54,7 @@ const ATTR_END: u32 = 0xFFFF_FFFF;
 
 const NS_DOS: u8 = 2;
 
-/// Parses one FILE record in place (fixups are applied to the buffer).
-///
-/// `Ok(None)`: not a record or not in use (free/beyond-initialized space) —
-/// skipped silently. `Err`: a torn or corrupt record — the caller counts it.
+/// Parses one FILE record in place; `Ok(None)` means free or not a FILE record.
 pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordFacts>, ParseError> {
     debug_assert!(rec.len() >= 512 && rec.len().is_power_of_two());
     if &rec[0..4] != b"FILE" {
@@ -74,7 +62,7 @@ pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordF
     }
     let header_flags = u16_at(rec, 0x16);
     if header_flags & 0x1 == 0 {
-        return Ok(None); // deleted / never used
+        return Ok(None);
     }
     apply_fixups(rec)?;
 
@@ -83,7 +71,6 @@ pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordF
     let used = u32_at(rec, 0x18) as usize;
     let base_ref = RecordRef(u64_at(rec, 0x20));
     let limit = used.min(rec.len());
-    // The attribute area may legitimately be just the 4-byte end marker.
     if first_attr < 0x30 || first_attr + 4 > limit {
         return Err(ParseError("attribute offset out of bounds"));
     }
@@ -116,27 +103,20 @@ pub fn parse_record(rec: &mut [u8], arena: &mut String) -> Result<Option<RecordF
             ATTR_FILE_NAME => file_name(attr, arena, &mut facts)?,
             ATTR_DATA => data(attr, &mut facts)?,
             ATTR_REPARSE_POINT => reparse_point(attr, &mut facts),
-            _ => {} // $ATTRIBUTE_LIST included: a full sweep sees extension
-                    // records anyway, so x20 is skipped by design (plan.md)
+            _ => {} // $ATTRIBUTE_LIST skipped; the full sweep sees extension records.
         }
         pos += alen;
     }
     Ok(Some(facts))
 }
 
-/// The $MFT's self-description, from FILE record 0: how many bytes of
-/// records exist and where they live on disk.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MftSelf {
-    /// $DATA real size — the read limit (records beyond it don't exist).
     pub data_size: u64,
     pub extents: Vec<crate::runs::Extent>,
 }
 
-/// Parses FILE record 0 for the $MFT's own unnamed $DATA runs. Errors if
-/// the runs in record 0 don't cover the whole attribute (a heavily
-/// fragmented $MFT spills runs into extension records — the caller falls
-/// back to FSCTL retrieval pointers rather than parsing $ATTRIBUTE_LIST).
+/// Parses FILE record 0 for the $MFT's own unnamed $DATA runs.
 pub fn parse_record0(rec: &mut [u8]) -> Result<MftSelf, ParseError> {
     if &rec[0..4] != b"FILE" || u16_at(rec, 0x16) & 0x1 == 0 {
         return Err(ParseError("record 0 is not a live FILE record"));
@@ -166,7 +146,7 @@ pub fn parse_record0(rec: &mut [u8]) -> Result<MftSelf, ParseError> {
         let attr = &rec[pos..pos + alen];
         pos += alen;
         if u32_at(attr, 0) != ATTR_DATA || attr[8] == 0 || attr[9] != 0 {
-            continue; // not the unnamed non-resident $DATA
+            continue;
         }
         if attr.len() < 64 || u64_at(attr, 16) != 0 {
             return Err(ParseError("record 0 $DATA shape unexpected"));
@@ -186,15 +166,15 @@ pub fn parse_record0(rec: &mut [u8]) -> Result<MftSelf, ParseError> {
             .checked_add(1)
             .ok_or(ParseError("record 0 run map overflows"))?;
         if covered != span {
+            // Fragmented $MFT spilling runs into extension records: the
+            // caller falls back to FSCTL rather than parsing $ATTRIBUTE_LIST.
             return Err(ParseError("$MFT runs incomplete in record 0"));
         }
         return Ok(MftSelf { data_size, extents });
     }
 }
 
-/// Maps a reparse tag to entry flags: name surrogates (junctions, symlinks)
-/// are marked and never descended; WOF-backed files are compressed; cloud
-/// placeholders (OneDrive & co) are flagged so dehydrated sizes read right.
+/// Maps a reparse tag to entry flags.
 pub fn reparse_entry_flags(tag: u32) -> EntryFlags {
     const NAME_SURROGATE: u32 = 0x2000_0000;
     const WOF: u32 = 0x8000_0017;
@@ -213,9 +193,8 @@ pub fn reparse_entry_flags(tag: u32) -> EntryFlags {
     f
 }
 
-/// FILETIME (100ns ticks since 1601) → Unix seconds; 0 stays 0 ("unknown").
-/// Division truncates toward zero, matching the generic walker's pre-1970
-/// handling (and jiff's, which the oracle tests lean on).
+/// FILETIME (100ns ticks since 1601) to Unix seconds; 0 stays unknown.
+/// Truncating division matches the walker (and jiff) on pre-1970 times.
 pub fn filetime_to_unix(ft: u64) -> i64 {
     const EPOCH_DELTA_TICKS: i128 = 116_444_736_000_000_000;
     if ft == 0 {
@@ -224,9 +203,7 @@ pub fn filetime_to_unix(ft: u64) -> i64 {
     ((ft as i128 - EPOCH_DELTA_TICKS) / 10_000_000) as i64
 }
 
-/// Verifies and undoes the update-sequence protection: the last word of
-/// every sector must equal the USN, and gets its saved value back. A
-/// mismatch means the record was torn mid-write.
+/// Applies NTFS update-sequence fixups; mismatch means a torn record.
 fn apply_fixups(rec: &mut [u8]) -> Result<(), ParseError> {
     let usa_off = u16_at(rec, 4) as usize;
     let count = u16_at(rec, 6) as usize;
@@ -284,9 +261,10 @@ fn file_name(attr: &[u8], arena: &mut String, facts: &mut RecordFacts) -> Result
     if namespace != NS_DOS {
         facts.link_names += 1;
     }
-    // NOTE: $FILE_NAME also carries sizes — they are notoriously stale and
-    // never trusted; sizes come from $DATA only.
+    // $FILE_NAME sizes are stale; trust $DATA.
     let rank = name_rank(namespace);
+    // Strict <: the first name of the best rank wins, so hardlink
+    // placement is deterministic (disk order).
     if facts.name.is_none_or(|n| rank < n.rank) {
         let off = arena.len() as u32;
         let units = v[0x42..0x42 + 2 * chars]
@@ -306,8 +284,6 @@ fn file_name(attr: &[u8], arena: &mut String, facts: &mut RecordFacts) -> Result
     Ok(())
 }
 
-/// Win32 (and Win32&DOS) beat POSIX beat DOS 8.3. First name of the best
-/// rank wins, so hardlink placement is deterministic (disk order).
 fn name_rank(namespace: u8) -> u8 {
     match namespace {
         1 | 3 => 0, // Win32, Win32&DOS
@@ -320,8 +296,8 @@ fn name_rank(namespace: u8) -> u8 {
 fn data(attr: &[u8], facts: &mut RecordFacts) -> Result<(), ParseError> {
     let named = attr[9] != 0;
     if attr[8] == 0 {
-        // Resident: the bytes live inside this MFT record, so on-disk
-        // allocation outside the MFT is 0 (decided policy, plan.md).
+        // Resident: the bytes live inside the MFT record, so allocation
+        // outside the MFT stays 0 by policy.
         let v = resident_value(attr)?.expect("checked resident");
         if !named && !facts.has_logical {
             facts.logical = v.len() as u64;
@@ -334,8 +310,7 @@ fn data(attr: &[u8], facts: &mut RecordFacts) -> Result<(), ParseError> {
         return Err(ParseError("non-resident header truncated"));
     }
     if u64_at(attr, 16) != 0 {
-        return Ok(()); // continuation fragment (lowest VCN > 0): sizes live
-        // in the VCN-0 fragment
+        return Ok(()); // lowest VCN > 0: continuation fragment; sizes live in VCN-0
     }
     let compression_unit = u16_at(attr, 34);
     let alloc = if compression_unit != 0 {
@@ -370,7 +345,6 @@ fn reparse_point(attr: &[u8], facts: &mut RecordFacts) {
     }
 }
 
-/// The value slice of a resident attribute; `Ok(None)` if non-resident.
 fn resident_value(attr: &[u8]) -> Result<Option<&[u8]>, ParseError> {
     if attr[8] != 0 {
         return Ok(None);
@@ -383,8 +357,7 @@ fn resident_value(attr: &[u8]) -> Result<Option<&[u8]>, ParseError> {
     Ok(Some(&attr[voff..voff + vlen]))
 }
 
-// Callers validate lengths before these reads; slice indexing is the last
-// line of defense (a panic here is a parser bug, not a corrupt-input path).
+// Bounds checks happen before these reads.
 fn u16_at(b: &[u8], off: usize) -> u16 {
     u16::from_le_bytes(b[off..off + 2].try_into().unwrap())
 }
@@ -470,8 +443,6 @@ mod tests {
             .std_info(0, FT_2020)
             .name(5, 5, 1, "torn.bin")
             .build(30, 1024);
-        // Corrupt the protected last word of the second sector — as if the
-        // second half of the record came from an older write.
         bytes[1022] ^= 0xFF;
         let mut arena = String::new();
         assert_eq!(
@@ -482,8 +453,6 @@ mod tests {
 
     #[test]
     fn fixup_restores_protected_words() {
-        // A resident value that spans the first sector boundary: bytes at the
-        // sector end travel through the fixup array and must come back intact.
         let payload: Vec<u8> = (0..=255).cycle().take(700).map(|b| b as u8).collect();
         let mut bytes = RecordBuilder::file()
             .name(5, 5, 1, "spans.bin")
@@ -492,7 +461,6 @@ mod tests {
         let mut arena = String::new();
         let facts = parse_record(&mut bytes, &mut arena).unwrap().unwrap();
         assert_eq!(facts.logical, 700);
-        // The parser saw the *restored* bytes; verify directly too.
         let start = bytes.windows(700).any(|w| w == payload);
         assert!(start, "payload should be restored verbatim after fixups");
     }
@@ -537,8 +505,6 @@ mod tests {
 
     #[test]
     fn named_streams_add_allocated_but_not_logical() {
-        // The WOF/CompactOS shape: sparse main stream ≈ 0 backed bytes, real
-        // data in the WofCompressedData ADS. Σ-streams prices it correctly.
         let (facts, _) = parse_one(
             RecordBuilder::file()
                 .name(5, 5, 1, "system.dll")
@@ -699,9 +665,6 @@ mod tests {
 
     #[test]
     fn pseudo_random_garbage_never_panics() {
-        // Deterministic xorshift junk with a valid "FILE" magic + in-use flag
-        // forced in, so the parser gets past the early outs and must survive
-        // the fixup/attribute machinery on hostile bytes.
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         let mut arena = String::new();
         for _ in 0..2000 {
@@ -738,7 +701,6 @@ mod tests {
 
     #[test]
     fn record0_with_incomplete_runs_is_an_error() {
-        // Runs cover 0x100 clusters but the VCN range claims 0x180.
         let runs = [0x22, 0x00, 0x01, 0x00, 0x04, 0x00];
         let mut rec = RecordBuilder::file()
             .name(5, 5, 3, "$MFT")
@@ -752,8 +714,6 @@ mod tests {
 
     #[test]
     fn record0_with_overflowing_run_sum_is_an_error() {
-        // Run 1: u64::MAX clusters, run 2: 2 more — the cluster sum
-        // overflows u64. Must be a parse error, never a panic.
         let runs = [
             0x18, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, // u64::MAX at +1
             0x11, 0x02, 0x01, // 2 clusters at +1
@@ -771,7 +731,6 @@ mod tests {
 
     #[test]
     fn record0_with_max_vcn_is_an_error() {
-        // highest_vcn = u64::MAX makes the record span (vcn + 1) overflow.
         let mut rec = RecordBuilder::file()
             .name(5, 5, 3, "$MFT")
             .data_nonresident_with_runs(4096, u64::MAX, &[0x11, 0x01, 0x01, 0x00])

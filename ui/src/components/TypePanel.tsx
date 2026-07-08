@@ -1,6 +1,4 @@
-// Detail panel: extension breakdown + largest files, scoped to the treemap
-// view root. Self-fetching with the same live-scan throttle discipline as
-// the treemap; colors index the shared category palette.
+// Extension breakdown + largest files for the treemap view root.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Row, type Snapshot, type TypePanelData } from "../lib/api";
@@ -43,26 +41,21 @@ export function TypePanel({
         if (seq === seqRef.current) setData(d);
       })
       .catch((e) => {
-        // "unknown node" is expected while the tree is still empty at scan
-        // start; the tick effect below retries naturally.
+        // The tree can still be empty at scan start; ticks retry naturally.
         if (!isStale(e) && !String(e).includes("unknown node")) {
           reportUnlessStale("loading file types", e);
         }
       });
   }, [generation, rootId, hideSystem]);
 
-  // New scan: drop the previous scan's numbers immediately.
   useEffect(() => {
     setData(null);
   }, [generation]);
 
-  // Root / filter / delete changed: refetch (previous numbers stay visible
-  // until the new ones land — no flicker on drill).
   useEffect(() => {
     fetchStats();
   }, [fetchStats, revision]);
 
-  // Live scan: throttled refresh on ticks, one final fetch on completion.
   const prevStateRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!snapshot || snapshot.generation !== generation) return;
@@ -86,8 +79,6 @@ export function TypePanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
         {data === null ? (
-          // Loading (or no scan yet): stay quiet — flashing "no files"
-          // before the first result lands reads as a wrong answer.
           generation === 0 ? (
             <div className="px-3 py-2 text-xs text-zinc-600">
               Appears during a scan

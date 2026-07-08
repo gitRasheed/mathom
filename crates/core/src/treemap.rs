@@ -1,12 +1,8 @@
 //! Squarified treemap layout (Bruls / Huizing / van Wijk, 2000).
 //!
-//! Pure math over the arena tree so it stays portable and unit-testable; the
-//! Tauri layer ships the rect list to a canvas renderer. Rects are emitted
-//! depth-first with every parent before its children: forward iteration is
-//! painter's order for drawing, reverse iteration is deepest-first for
-//! hit-testing. Children below `min_area_px` are culled but still consume
-//! their share of space, so dense regions of tiny files read as the parent
-//! directory's color.
+//! Rects are emitted parents-before-children: forward iteration is painter's
+//! order for drawing, reverse is deepest-first for hit-testing. Children
+//! below `min_area_px` are culled but still consume their share of space.
 
 use crate::category::categorize;
 use crate::entry::EntryFlags;
@@ -20,14 +16,10 @@ pub struct Viewport {
 
 #[derive(Clone, Copy, Debug)]
 pub struct TreemapOptions {
-    /// Rects with area below this many px² are culled.
     pub min_area_px: f32,
-    /// Inset applied inside a directory rect before laying out its children.
     pub padding_px: f32,
-    /// Maximum nesting depth (root = 0).
     pub max_depth: u8,
-    /// Omit SYSTEM entries; tiles are proportioned by visible (non-system)
-    /// bytes so hidden content vanishes instead of leaving blank space.
+    /// Omit SYSTEM entries and proportion tiles by visible bytes.
     pub hide_system: bool,
 }
 
@@ -54,13 +46,7 @@ pub struct TreemapRect {
     pub category: u8,
 }
 
-/// Lays out the subtree under `root` into `viewport`. `root` may be any
-/// directory (drill-down = re-layout from that directory).
-///
-/// Space is normalized by the sum of the children's sizes, not the parent's
-/// aggregate, so the rect always fills completely (once directories carry
-/// own-size from the MFT backend, those bytes are simply not visible as a
-/// tile of their own).
+/// Lays out any directory subtree into `viewport`.
 pub fn layout(
     tree: &Tree,
     root: NodeId,
@@ -77,8 +63,6 @@ pub fn layout(
         w: viewport.w as f64,
         h: viewport.h as f64,
     };
-    // When hiding system files, precompute each node's visible (non-system)
-    // subtree size so tiles are proportioned by what's actually shown.
     let visible = opts.hide_system.then(|| {
         let mut v = vec![0u64; tree.len()];
         fill_visible(tree, root, &mut v);
@@ -88,8 +72,6 @@ pub fn layout(
     out
 }
 
-/// Bytes under `id` excluding SYSTEM subtrees. A system node contributes 0
-/// (its whole subtree is hidden); a directory is the sum of its children.
 fn fill_visible(tree: &Tree, id: NodeId, visible: &mut [u64]) -> u64 {
     let node = tree.node(id);
     let size = if node.flags.contains(EntryFlags::SYSTEM) {
@@ -105,8 +87,6 @@ fn fill_visible(tree: &Tree, id: NodeId, visible: &mut [u64]) -> u64 {
     size
 }
 
-/// Size used to proportion a node's tile: its precomputed visible size when
-/// hiding system files, otherwise its full aggregate.
 fn effective_size(tree: &Tree, id: NodeId, visible: Option<&[u64]>) -> u64 {
     match visible {
         Some(v) => v[id as usize],
@@ -198,7 +178,6 @@ fn lay_children(
         }
         let side = remaining.w.min(remaining.h);
 
-        // Greedy row: keep adding items while the worst aspect ratio improves.
         let first = items[i].1 as f64 * scale;
         let (mut sum, mut max, mut min) = (first, first, first);
         let mut worst = worst_aspect(sum, max, min, side);
@@ -232,15 +211,12 @@ fn lay_children(
     }
 }
 
-/// Worst aspect ratio of a row with total area `sum`, extreme item areas
-/// `max`/`min`, laid along a side of length `side` (Bruls et al., eq. in §4).
 fn worst_aspect(sum: f64, max: f64, min: f64, side: f64) -> f64 {
     let s2 = sum * sum;
     let w2 = side * side;
     (w2 * max / s2).max(s2 / (w2 * min))
 }
 
-/// Lays one row along the shorter side of `remaining` and shrinks it.
 #[allow(clippy::too_many_arguments)]
 fn lay_row(
     tree: &Tree,
@@ -256,13 +232,10 @@ fn lay_row(
 ) {
     let horizontal = remaining.w < remaining.h; // row spans the full width
     let side = if horizontal { remaining.w } else { remaining.h };
-    // Clamp so the final row can never overshoot the frame on float error.
     let thickness = (row_area / side).min(if horizontal { remaining.h } else { remaining.w });
 
     let mut offset = 0.0;
     for (k, &(id, size)) in row.iter().enumerate() {
-        // Snap the last item to the far edge: cumulative float drift must
-        // not leave hairline gaps or overshoot.
         let len = if k == row.len() - 1 {
             side - offset
         } else {
@@ -320,7 +293,6 @@ mod tests {
         }
     }
 
-    /// Flat tree: root (id 0) + one file per (name, size).
     fn flat_tree(files: &[(&str, u64)]) -> Tree {
         let mut b = EntryBatch::default();
         b.push("root", entry(0, 0, DIR, 0));

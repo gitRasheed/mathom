@@ -1,7 +1,5 @@
-//! Windows volume I/O: open the raw volume, locate the $MFT, and stream it
-//! in sector-aligned buffers. The only module that touches the disk — all
-//! `unsafe` in the crate lives here (aligned allocation + Win32 calls),
-//! wrapped so the rest speaks safe types.
+//! Windows volume I/O and sector-aligned $MFT reads — the only module that
+//! touches the disk; all `unsafe` in the crate lives here.
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::path::Path;
@@ -29,7 +27,7 @@ pub struct AlignedBuf {
     len: usize,
 }
 
-// Exclusive ownership of a raw allocation; nothing thread-affine about it.
+// SAFETY: exclusive ownership of a raw allocation; nothing thread-affine.
 unsafe impl Send for AlignedBuf {}
 
 impl AlignedBuf {
@@ -56,16 +54,11 @@ impl Drop for AlignedBuf {
     }
 }
 
-/// Where a scan root lives: its volume (as a mount-point path like `C:\` or
-/// a folder mount) and the path components below the volume root.
 pub struct VolumeLocation {
     pub mount: String,
     pub components: Vec<String>,
 }
 
-/// Resolves a scan root to its volume mount point + relative components.
-/// Symlinks/junctions in the path are resolved first so the MFT tree walk
-/// sees real names.
 pub fn locate(root: &Path) -> Result<VolumeLocation, String> {
     let canonical = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let wide = to_wide(canonical.as_os_str());
@@ -85,7 +78,6 @@ pub fn locate(root: &Path) -> Result<VolumeLocation, String> {
     Ok(VolumeLocation { mount, components })
 }
 
-/// True when the mounted filesystem is NTFS.
 pub fn is_ntfs(mount: &str) -> bool {
     let wide = to_wide(mount.as_ref());
     let mut fs_name = [0u16; 64];
@@ -104,25 +96,24 @@ pub fn is_ntfs(mount: &str) -> bool {
         && from_wide(&fs_name) == "NTFS"
 }
 
-/// An open raw-volume handle (needs elevation).
 pub struct Volume {
     handle: Owned<windows::Win32::Foundation::HANDLE>,
 }
 
-// The handle is used from the reader thread only after construction.
+// SAFETY: the handle is used from the reader thread only after construction.
 unsafe impl Send for Volume {}
 
 impl Volume {
-    /// Opens the volume backing `mount` (e.g. `C:\` → `\\?\Volume{…}`).
-    /// Fails with access-denied when not elevated — the probe signal.
+    /// Opens the raw volume backing `mount`. Fails with access-denied when
+    /// not elevated — that failure is the probe's fallback signal.
     pub fn open(mount: &str) -> Result<Volume, String> {
         let mount_wide = to_wide(mount.as_ref());
         let mut guid = [0u16; 64];
         // SAFETY: valid NUL-terminated mount path and output buffer.
         unsafe { GetVolumeNameForVolumeMountPointW(PCWSTR(mount_wide.as_ptr()), &mut guid) }
             .map_err(|e| format!("volume name for {mount}: {e}"))?;
-        // CreateFileW wants the volume path *without* the trailing slash.
         let mut device = from_wide(&guid);
+        // CreateFileW wants the volume path without the trailing slash.
         while device.ends_with('\\') {
             device.pop();
         }
@@ -147,8 +138,6 @@ impl Volume {
         })
     }
 
-    /// Positioned synchronous read. Offset, length, and the buffer address
-    /// all honor the no-buffering alignment rules by construction.
     pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<(), String> {
         let mut overlapped = OVERLAPPED::default();
         overlapped.Anonymous.Anonymous.Offset = offset as u32;
@@ -173,8 +162,8 @@ impl Volume {
         Ok(())
     }
 
-    /// The volume's real byte length, from the driver — the ground truth
-    /// that disk-supplied sizes (boot sector, record 0) are checked against.
+    /// The volume's real byte length from the driver — the ground truth
+    /// every disk-supplied size is validated against.
     pub fn length(&self) -> Result<u64, String> {
         let mut info = GET_LENGTH_INFORMATION::default();
         let mut written = 0u32;
@@ -196,9 +185,8 @@ impl Volume {
         u64::try_from(info.Length).map_err(|_| "volume reports a negative length".into())
     }
 
-    /// The $MFT's extents via `FSCTL_GET_RETRIEVAL_POINTERS` on the given
-    /// handle-able path — the fallback when record 0's run list is
-    /// incomplete, and the debug cross-check for the parsed one.
+    /// $MFT extents via `FSCTL_GET_RETRIEVAL_POINTERS` — the fallback when
+    /// record 0's run list is incomplete, and the debug cross-check for it.
     pub fn mft_extents_via_fsctl(mount: &str) -> Result<Vec<Extent>, String> {
         let path = format!("{mount}$MFT::$DATA");
         let wide = to_wide(path.as_ref());
@@ -219,8 +207,7 @@ impl Volume {
         let handle = unsafe { Owned::new(handle) };
 
         let input = STARTING_VCN_INPUT_BUFFER::default();
-        // u64-backed so the RETRIEVAL_POINTERS_BUFFER view below is aligned
-        // (a Vec<u8> only guarantees byte alignment — casting it would be UB).
+        // u64-backed so the RETRIEVAL_POINTERS_BUFFER view is aligned.
         let mut out = vec![0u64; 8 * 1024];
         let mut written = 0u32;
         loop {
@@ -277,30 +264,22 @@ impl Volume {
     }
 }
 
-/// Everything needed to read the whole $MFT. Sizes are validated by
-/// `plan_mft_read` against the volume's geometry and the device's real
-/// length, so downstream offset math and the slot-table size are bounded.
 pub struct MftMap {
     pub geometry: Geometry,
     pub extents: Vec<Extent>,
-    /// Total record bytes (the $MFT $DATA real size, extent-capped).
     pub mft_bytes: u64,
     pub total_records: u32,
 }
 
-/// Reads the boot sector + record 0 and produces the read plan. `mount` is
-/// used for the FSCTL fallback when record 0's runs are incomplete.
 pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
     let device_bytes = volume.length()?;
     let mut boot = AlignedBuf::new(4096);
     volume.read_at(0, boot.as_mut_slice())?;
     let geometry = parse_boot_sector(boot.as_mut_slice()).map_err(|e| e.to_string())?;
     // Nothing may be sized or offset from the boot sector's totals until
-    // they're proven to fit the actual device (record 0's offset included).
+    // they're proven to fit the device (record 0's offset included).
     geometry_fits_device(&geometry, device_bytes).map_err(|e| e.to_string())?;
     if !(geometry.cluster_size as u64).is_multiple_of(geometry.record_size as u64) {
-        // Extents would not be record-aligned (sub-1KiB clusters). Rare
-        // enough that falling back to the walker beats complicating reads.
         return Err("unsupported geometry: cluster smaller than FILE record".into());
     }
 
@@ -316,8 +295,7 @@ pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
             (m.extents, m.data_size)
         }
         Err(crate::ParseError("$MFT runs incomplete in record 0")) => {
-            // Heavily fragmented $MFT: let the filesystem enumerate it. No
-            // real $DATA size here — the plan reads all covered clusters.
+            // No real $DATA size known: u64::MAX = read all covered clusters.
             (Volume::mft_extents_via_fsctl(mount)?, u64::MAX)
         }
         Err(e) => return Err(e.to_string()),

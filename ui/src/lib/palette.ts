@@ -1,5 +1,4 @@
-// Category colors, indexed by mathom-core's `Category as u8`. Shared by the
-// treemap tiles and the type panel so the two can never disagree.
+// Indexed by mathom-core's `Category as u8`.
 export const PALETTE: readonly string[] = [
   "#30323a", // 0 directory plate
   "#a855f7", // 1 video

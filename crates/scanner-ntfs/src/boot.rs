@@ -1,45 +1,31 @@
-//! NTFS boot sector → volume geometry and the $MFT's first cluster, plus
-//! the read-plan validation that makes those disk-supplied sizes safe to
-//! multiply and allocate with.
+//! NTFS boot-sector geometry and $MFT read-plan validation.
 
 use crate::ParseError;
 use crate::runs::Extent;
 
-/// Everything the reader needs to interpret the volume, straight from the
-/// boot sector. All sizes in bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Geometry {
     pub bytes_per_sector: u32,
     pub cluster_size: u32,
-    /// FILE record size (1 KiB on almost every volume; 4 KiB on 4Kn disks).
     pub record_size: u32,
-    /// First cluster of the $MFT (where FILE record 0 lives).
     pub mft_lcn: u64,
     pub total_clusters: u64,
 }
 
 impl Geometry {
-    /// Callers must have run [`geometry_fits_device`] first — it proves
-    /// every in-volume cluster offset (this one included) fits u64.
+    /// Callers must have passed [`geometry_fits_device`] first — it proves
+    /// every in-volume cluster offset (this multiply included) fits u64.
     pub fn mft_byte_offset(&self) -> u64 {
         self.mft_lcn * self.cluster_size as u64
     }
 }
 
-/// The validated $MFT read plan. Produced only by [`plan_mft_read`] — the
-/// trust boundary for every disk-supplied size downstream code multiplies,
-/// reads, or allocates with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MftPlan {
-    /// Bytes of FILE records to read ($DATA real size, extent-capped).
     pub mft_bytes: u64,
-    /// `mft_bytes` in whole records; fits NTFS's 32-bit record-number space.
     pub total_records: u32,
 }
 
-/// Rejects geometry describing more volume than the device physically has.
-/// The boot sector's totals are disk bytes, not facts — until this passes,
-/// nothing may be sized, offset, or allocated from them.
 pub fn geometry_fits_device(geometry: &Geometry, device_bytes: u64) -> Result<(), ParseError> {
     match geometry
         .total_clusters
@@ -50,11 +36,10 @@ pub fn geometry_fits_device(geometry: &Geometry, device_bytes: u64) -> Result<()
     }
 }
 
-/// Validates the $MFT's self-description (record 0 or FSCTL) against the
-/// volume's own geometry and the device's real size. Afterwards every
-/// extent read offset and the slot-table size are bounded by `device_bytes`
-/// and overflow-free. `data_size` of `u64::MAX` means "unknown, read all
-/// covered clusters" (the FSCTL fallback has no real size).
+/// Validates disk-supplied $MFT extents against geometry and device size —
+/// the trust boundary for every size downstream code multiplies, reads, or
+/// allocates with. `data_size == u64::MAX` means "unknown, read all covered
+/// clusters" (the FSCTL fallback has no real size).
 pub fn plan_mft_read(
     geometry: &Geometry,
     extents: &[Extent],
@@ -75,8 +60,7 @@ pub fn plan_mft_read(
         };
     }
 
-    // covered ≤ total_clusters and total_clusters × cluster fits (checked
-    // above), so this multiplication cannot overflow.
+    // covered ≤ total_clusters, whose byte product was checked above.
     let mft_bytes = data_size.min(covered * geometry.cluster_size as u64);
     let total_records = mft_bytes / geometry.record_size as u64;
     if total_records == 0 {
@@ -91,7 +75,6 @@ pub fn plan_mft_read(
     }
 }
 
-/// Parses the first sector of an NTFS volume. Accepts at least 512 bytes.
 pub fn parse_boot_sector(sector: &[u8]) -> Result<Geometry, ParseError> {
     if sector.len() < 512 {
         return Err(ParseError("boot sector shorter than 512 bytes"));
@@ -108,8 +91,6 @@ pub fn parse_boot_sector(sector: &[u8]) -> Result<Geometry, ParseError> {
         return Err(ParseError("implausible bytes per sector"));
     }
 
-    // Sectors per cluster: plain count, or (for clusters > 64 KiB) a negative
-    // power-of-two exponent. Same signed encoding as clusters-per-record.
     let sectors_per_cluster = match sector[13] as i8 {
         n if n > 0 => n as u32,
         n if (-25..0).contains(&n) => 1u32 << (-n as u32),
@@ -129,8 +110,6 @@ pub fn parse_boot_sector(sector: &[u8]) -> Result<Geometry, ParseError> {
         return Err(ParseError("$MFT cluster out of range"));
     }
 
-    // Clusters per FILE record: positive = cluster count, negative = the
-    // record is 2^|x| bytes (the common case: 0xF6 → 1024).
     let record_size = match sector[0x40] as i8 {
         n if n > 0 => (n as u32)
             .checked_mul(cluster_size)
@@ -159,7 +138,6 @@ fn u64_at(b: &[u8], off: usize) -> u64 {
 mod tests {
     use super::*;
 
-    /// A boot sector for a volume shaped like a typical desktop C: drive.
     fn typical_boot() -> [u8; 512] {
         let mut b = [0u8; 512];
         b[3..11].copy_from_slice(b"NTFS    ");
@@ -245,7 +223,6 @@ mod tests {
         assert!(parse_boot_sector(&b).is_err());
     }
 
-    /// The volume `typical_boot` describes: 62.5M clusters × 4 KiB.
     fn typical_geometry() -> (Geometry, u64) {
         let g = parse_boot_sector(&typical_boot()).unwrap();
         let device_bytes = g.total_clusters * g.cluster_size as u64;
@@ -255,7 +232,6 @@ mod tests {
     #[test]
     fn plan_accepts_a_typical_mft() {
         let (g, dev) = typical_geometry();
-        // One 2.5 GiB extent; $DATA real size a bit under the allocation.
         let extents = [Extent {
             lcn: 786_432,
             clusters: 655_360,
@@ -306,8 +282,6 @@ mod tests {
     #[test]
     fn plan_rejects_overlapping_extents_covering_more_than_the_volume() {
         let (g, dev) = typical_geometry();
-        // Each extent is individually in-bounds; together they claim more
-        // clusters than the volume has.
         let half = Extent {
             lcn: 0,
             clusters: g.total_clusters / 2 + 1,
@@ -329,8 +303,6 @@ mod tests {
 
     #[test]
     fn plan_rejects_record_count_beyond_u32() {
-        // A (real, huge) device whose forged record 0 claims a 4 TiB $MFT:
-        // 2^32 × 1 KiB records is one past the u32 record-number space.
         let g = Geometry {
             bytes_per_sector: 512,
             cluster_size: 4096,
