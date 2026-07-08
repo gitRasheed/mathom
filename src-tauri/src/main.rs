@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod elevation;
+mod protected;
 mod scan;
 
 fn main() {
@@ -19,6 +20,7 @@ fn main() {
             scan::get_type_stats,
             scan::get_ancestors,
             scan::search,
+            scan::delete_preflight,
             scan::delete_entry,
             scan::open_in_explorer,
             elevation::elevation_status,

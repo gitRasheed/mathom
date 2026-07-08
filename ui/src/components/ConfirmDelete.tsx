@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, type DeletePreflight } from "../lib/api";
 import { formatBytes, formatNumber } from "../lib/format";
 import { reportUnlessStale } from "../lib/errors";
 
@@ -30,7 +30,9 @@ export function ConfirmDelete({
   onCancel,
   onConfirm,
 }: ConfirmDeleteProps) {
-  const [path, setPath] = useState<string | null>(null);
+  // Confirm stays disabled until the preflight lands: it carries the path
+  // shown to the user and whether policy blocks this delete outright.
+  const [preflight, setPreflight] = useState<DeletePreflight | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -40,9 +42,9 @@ export function ConfirmDelete({
   useEffect(() => {
     let live = true;
     api
-      .getPath(generation, target.id)
+      .deletePreflight(generation, target.id)
       .then((p) => {
-        if (live) setPath(p);
+        if (live) setPreflight(p);
       })
       .catch((e) => reportUnlessStale("resolving path", e));
     return () => {
@@ -59,6 +61,7 @@ export function ConfirmDelete({
   }, [busy, onCancel]);
 
   const kind = target.isDir ? "folder" : "file";
+  const blocked = preflight?.blockReason ?? null;
 
   return (
     <div
@@ -79,8 +82,11 @@ export function ConfirmDelete({
           <div className="truncate text-[13px] font-medium text-zinc-200" title={target.name}>
             {target.name}
           </div>
-          <div className="mt-0.5 truncate text-[11px] text-zinc-500" title={path ?? undefined}>
-            {path ?? "…"}
+          <div
+            className="mt-0.5 truncate text-[11px] text-zinc-500"
+            title={preflight?.path ?? undefined}
+          >
+            {preflight?.path ?? "…"}
           </div>
           <div className="tnum mt-1 text-[11px] text-zinc-500">
             {formatBytes(target.size)}
@@ -93,16 +99,21 @@ export function ConfirmDelete({
             type="checkbox"
             className="accent-red-500"
             checked={permanent}
-            disabled={busy}
+            disabled={busy || blocked !== null}
             onChange={(e) => onPermanentChange(e.target.checked)}
           />
           Delete permanently (skip the Recycle Bin)
         </label>
 
-        <p className={`mt-2 text-[11px] ${permanent ? "text-red-400" : "text-zinc-500"}`}>
-          {permanent
-            ? "This can't be undone."
-            : "Moves to the Recycle Bin — you can restore it from there."}
+        <p
+          className={`mt-2 text-[11px] ${
+            blocked ? "text-amber-400" : permanent ? "text-red-400" : "text-zinc-500"
+          }`}
+        >
+          {blocked ??
+            (permanent
+              ? "This can't be undone."
+              : "Moves to the Recycle Bin — you can restore it from there.")}
         </p>
 
         <div className="mt-4 flex justify-end gap-2">
@@ -120,7 +131,7 @@ export function ConfirmDelete({
                 ? "bg-red-600 hover:bg-red-500"
                 : "bg-teal-600 hover:bg-teal-500"
             }`}
-            disabled={busy}
+            disabled={busy || preflight === null || blocked !== null}
             onClick={onConfirm}
           >
             {busy

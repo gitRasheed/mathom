@@ -53,6 +53,12 @@ export interface Crumb {
   name: string;
 }
 
+export interface DeletePreflight {
+  path: string;
+  /** Set when policy forbids deleting this path; the UI disables confirm. */
+  blockReason: string | null;
+}
+
 export interface DeleteResult {
   removedBytes: number;
   removedFiles: number;
@@ -143,6 +149,8 @@ export const api = {
     invoke<Crumb[]>("get_ancestors", { generation, id }),
   search: (generation: number, query: string, hideSystem: boolean) =>
     invoke<SearchResults>("search", { generation, query, hideSystem }),
+  deletePreflight: (generation: number, id: number) =>
+    invoke<DeletePreflight>("delete_preflight", { generation, id }),
   deleteEntry: (generation: number, id: number, permanent: boolean) =>
     invoke<DeleteResult>("delete_entry", { generation, id, permanent }),
   openInExplorer: (generation: number, id: number) =>

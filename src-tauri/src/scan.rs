@@ -472,9 +472,38 @@ pub fn get_ancestors(
         .collect())
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletePreflight {
+    path: String,
+    /// Set when policy forbids deleting this path; the UI disables confirm.
+    block_reason: Option<String>,
+}
+
+/// What the delete-confirmation dialog needs before the user can commit:
+/// the resolved path, and whether policy would refuse it anyway.
+#[tauri::command]
+pub fn delete_preflight(
+    state: State<'_, AppState>,
+    generation: u64,
+    id: NodeId,
+) -> Result<DeletePreflight, String> {
+    let session = session_for(&state, generation)?;
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    if !tree.is_live(id) {
+        return Err("unknown item".into());
+    }
+    let path = tree.path(id);
+    let block_reason = crate::protected::deletion_block_reason(&path);
+    Ok(DeletePreflight { path, block_reason })
+}
+
 /// Deletes a node's file/directory (Recycle Bin unless `permanent`), then
 /// subtracts its subtree from the live tree so the UI updates without a
 /// rescan. The blocking filesystem op runs with no tree lock held.
+/// Policy-protected paths are refused here too — the preflight is UX, not
+/// the enforcement point.
 #[tauri::command]
 pub fn delete_entry(
     app: AppHandle,
@@ -499,6 +528,10 @@ pub fn delete_entry(
         let node = tree.node(id);
         (tree.path(id), node.parent(), node.is_dir())
     };
+
+    if let Some(reason) = crate::protected::deletion_block_reason(&path) {
+        return Err(reason);
+    }
 
     if permanent {
         let res = if is_dir {
