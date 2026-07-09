@@ -8,7 +8,6 @@ and delete to the Recycle Bin.
 edges and breaking changes between releases. Windows only for now; the core
 crates build on Linux and macOS by design, there just is no UI for them yet.
 
-<!-- screenshot goes here: docs/screenshot.png -->
 
 ## Why another one
 
