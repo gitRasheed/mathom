@@ -446,6 +446,20 @@ pub struct DeletePreflight {
     block_reason: Option<String>,
 }
 
+/// Why deleting `path` must be refused right now, or `None` if it's allowed.
+/// Mid-scan deletes are refused: `remove` vacates subtree slots that in-flight
+/// batches may still name as parents, which panics `add_batch` on the drain
+/// thread. States past Scanning are terminal, so a non-Scanning answer here
+/// can't be raced by a late batch.
+fn delete_block_reason(scan_state: ScanState, path: &str) -> Option<String> {
+    if scan_state == ScanState::Scanning {
+        return Some(
+            "can't delete while a scan is running — cancel it or wait for it to finish".into(),
+        );
+    }
+    crate::protected::deletion_block_reason(path)
+}
+
 #[tauri::command]
 pub fn delete_preflight(
     state: State<'_, AppState>,
@@ -453,13 +467,14 @@ pub fn delete_preflight(
     id: NodeId,
 ) -> Result<DeletePreflight, String> {
     let session = session_for(&state, generation)?;
+    let scan_state = session.progress.lock().unwrap().state;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
     if !tree.is_live(id) {
         return Err("unknown item".into());
     }
     let path = tree.path(id);
-    let block_reason = crate::protected::deletion_block_reason(&path);
+    let block_reason = delete_block_reason(scan_state, &path);
     Ok(DeletePreflight { path, block_reason })
 }
 
@@ -472,6 +487,7 @@ pub fn delete_entry(
     permanent: bool,
 ) -> Result<DeleteResult, String> {
     let session = session_for(&state, generation)?;
+    let scan_state = session.progress.lock().unwrap().state;
 
     let (path, parent_id, is_dir) = {
         let builder = session.builder.read().unwrap();
@@ -488,7 +504,7 @@ pub fn delete_entry(
 
     // Re-checked here even though the dialog ran the preflight — this is
     // the enforcement point; the preflight is UX.
-    if let Some(reason) = crate::protected::deletion_block_reason(&path) {
+    if let Some(reason) = delete_block_reason(scan_state, &path) {
         return Err(reason);
     }
 
@@ -693,5 +709,24 @@ fn sort_rows(rows: &mut [Row], key: &str, descending: bool) {
     }
     if descending {
         rows.reverse();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deletes_are_blocked_while_scanning() {
+        assert!(delete_block_reason(ScanState::Scanning, "C:\\Users\\me\\big.iso").is_some());
+    }
+
+    #[test]
+    fn finished_scans_defer_to_path_policy() {
+        assert!(delete_block_reason(ScanState::Done, "C:\\Users\\me\\big.iso").is_none());
+        assert!(delete_block_reason(ScanState::Cancelled, "C:\\Users\\me\\big.iso").is_none());
+        assert!(delete_block_reason(ScanState::Failed, "C:\\Users\\me\\big.iso").is_none());
+        // Path policy still applies once the scan is over.
+        assert!(delete_block_reason(ScanState::Done, "C:\\$Recycle.Bin").is_some());
     }
 }

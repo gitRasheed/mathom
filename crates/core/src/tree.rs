@@ -541,6 +541,19 @@ mod tests {
         assert!(!tree.is_live(1));
     }
 
+    // The delete-during-scan hazard: remove() vacates slots that in-flight
+    // batches may still name as parents, so the app refuses deletes while a
+    // scan is running. This pins the panic the gate prevents.
+    #[test]
+    #[should_panic(expected = "not yet emitted or not a dir")]
+    fn add_batch_panics_when_parent_was_removed_mid_stream() {
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
+        builder.add_batch(&batch(&[("a", entry(1, 0, DIR, 0))]));
+        builder.remove(1);
+        builder.add_batch(&batch(&[("late", entry(2, 1, FILE, 5))]));
+    }
+
     #[test]
     fn is_live_rejects_never_filled_gap_slots() {
         let mut builder = TreeBuilder::new();
