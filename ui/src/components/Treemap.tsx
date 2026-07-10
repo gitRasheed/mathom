@@ -25,7 +25,7 @@ import {
 } from "../lib/api";
 import { isStale, reportUnlessStale } from "../lib/errors";
 import { formatBytes, formatPercent } from "../lib/format";
-import { PALETTE } from "../lib/palette";
+import { PALETTE, canvasColors } from "../lib/palette";
 
 const SCAN_REFRESH_MS = 400;
 const ZOOM_MS = 220;
@@ -77,6 +77,8 @@ export interface TreemapProps {
   rootId: number;
   /** Bumped by App on an out-of-band tree change (a delete) to force relayout. */
   revision: number;
+  /** Bumped by useTheme after a theme/accent change to force a re-bake. */
+  themeRev: number;
   hideSystem: boolean;
   selected: number | null;
   hoveredId: number | null;
@@ -91,6 +93,7 @@ export function Treemap({
   generation,
   rootId,
   revision,
+  themeRev,
   hideSystem,
   selected,
   hoveredId,
@@ -140,6 +143,7 @@ export function Treemap({
     ctx.clearRect(0, 0, overlay.width, overlay.height);
     if (hitFrozenRef.current) return;
     const dpr = window.devicePixelRatio || 1;
+    const theme = canvasColors();
     const outline = (id: number | null, color: string, width: number) => {
       if (id === null || id === rootIdRef.current) return;
       const r = byIdRef.current.get(id);
@@ -154,15 +158,15 @@ export function Treemap({
         s.h - width,
       );
     };
-    outline(selectedRef.current, "#f4f4f5", 2);
+    outline(selectedRef.current, theme.selection, 2);
     const hovered = hoveredIdRef.current;
     if (hovered !== null && hovered !== selectedRef.current) {
       if (hovered === rootIdRef.current || crumbIdsRef.current.has(hovered)) {
-        ctx.strokeStyle = "#2dd4bf";
+        ctx.strokeStyle = theme.hoverRing;
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, overlay.width - 3, overlay.height - 3);
       } else {
-        outline(hovered, "#2dd4bf", 2);
+        outline(hovered, theme.hoverRing, 2);
       }
     }
   }, []);
@@ -200,11 +204,12 @@ export function Treemap({
     const ctx = off.getContext("2d")!;
     const dpr = window.devicePixelRatio || 1;
     const rects = rectsRef.current;
+    const theme = canvasColors();
 
-    ctx.fillStyle = "#0f1115";
+    ctx.fillStyle = theme.background;
     ctx.fillRect(0, 0, off.width, off.height);
 
-    ctx.fillStyle = PALETTE[0];
+    ctx.fillStyle = theme.plate;
     ctx.beginPath();
     for (const r of rects) {
       if (!r.isDir) continue;
@@ -372,6 +377,10 @@ export function Treemap({
     if (revision === 0) return;
     void fetchLayout();
   }, [revision, fetchLayout]);
+
+  useEffect(() => {
+    bake(); // repaint the baked layout with the new theme's canvas colors
+  }, [themeRev, bake]);
 
   useEffect(() => {
     void fetchLayout();
@@ -590,18 +599,18 @@ export function Treemap({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex h-8 shrink-0 items-center gap-1 overflow-hidden border-b border-zinc-800 px-3 text-xs">
+      <div className="flex h-8 shrink-0 items-center gap-1 overflow-hidden border-b border-edge px-3 text-xs">
         {crumbs.length === 0 ? (
-          <span className="text-zinc-600">Treemap</span>
+          <span className="text-ink-5">Treemap</span>
         ) : (
           crumbs.map((c, i) => (
             <Fragment key={c.id}>
-              {i > 0 && <span className="shrink-0 text-zinc-600">›</span>}
+              {i > 0 && <span className="shrink-0 text-ink-5">›</span>}
               <button
                 className={`max-w-56 truncate ${
                   i === crumbs.length - 1
-                    ? "text-zinc-200"
-                    : "text-zinc-500 hover:text-zinc-200"
+                    ? "text-ink"
+                    : "text-ink-4 hover:text-ink"
                 }`}
                 onClick={() => onNavigate(c.id)}
                 title={c.name}
@@ -625,7 +634,7 @@ export function Treemap({
         <canvas ref={baseRef} className="absolute inset-0 h-full w-full" />
         <canvas ref={overlayRef} className="absolute inset-0 h-full w-full" />
         {!hasRects && (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-zinc-600">
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-ink-5">
             {generation === 0
               ? "Treemap appears here during a scan"
               : "Waiting for data…"}
@@ -634,15 +643,13 @@ export function Treemap({
         {tooltip && (
           <div
             ref={tooltipRef}
-            className="pointer-events-none absolute top-0 left-0 z-10 max-w-64 rounded-md border border-zinc-700 bg-zinc-900/95 px-2.5 py-1.5 text-xs shadow-lg"
+            className="pointer-events-none absolute top-0 left-0 z-10 max-w-64 rounded-md border border-edge-strong bg-panel/95 px-2.5 py-1.5 text-xs shadow-lg"
           >
-            <div className="truncate font-medium text-zinc-100">
-              {tooltip.name}
-            </div>
-            <div className="tnum text-zinc-400">
+            <div className="truncate font-medium text-ink">{tooltip.name}</div>
+            <div className="tnum text-ink-3">
               {tooltip.size} · {tooltip.pct} of parent
             </div>
-            <div className="truncate text-[11px] text-zinc-500">
+            <div className="truncate text-[11px] text-ink-4">
               {tooltip.path}
             </div>
           </div>

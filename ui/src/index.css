@@ -1,7 +1,61 @@
 @import "tailwindcss";
 
+/* Semantic tokens; dark is the design baseline. The accent family is set at
+   runtime by lib/theme.ts (user-picked ramp), these are its teal defaults. */
+@theme {
+  --color-app: #0f1115; /* window + canvas background */
+  --color-panel: #18181b; /* inputs, menus, dialogs, buttons */
+  --color-hush: #18181b; /* row hover: one step off the app bg */
+  --color-raised: #27272a; /* selection, hover on panel surfaces */
+  --color-edge: #27272a;
+  --color-edge-strong: #3f3f46;
+  --color-plate: #30323a; /* treemap directory plate */
+
+  --color-ink: #f4f4f5;
+  --color-ink-2: #d4d4d8;
+  --color-ink-3: #a1a1aa;
+  --color-ink-4: #71717a;
+  --color-ink-5: #52525b;
+
+  --color-accent: #0d9488;
+  --color-accent-hover: #14b8a6;
+  --color-accent-ink: #2dd4bf;
+  --color-accent-edge: #0f766e;
+  --color-accent-soft: #134e4a;
+
+  --color-danger: #dc2626;
+  --color-danger-hover: #ef4444;
+  --color-danger-ink: #f87171;
+  --color-danger-edge: #7f1d1d;
+  --color-danger-soft: #450a0a;
+  --color-warn: #fbbf24;
+}
+
 :root {
   color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-app: #fafafa;
+  --color-panel: #ffffff;
+  --color-hush: #f0f0f1;
+  --color-raised: #e4e4e7;
+  --color-edge: #e4e4e7;
+  --color-edge-strong: #d4d4d8;
+  --color-plate: #dcdce0;
+
+  --color-ink: #18181b;
+  --color-ink-2: #3f3f46;
+  --color-ink-3: #52525b;
+  --color-ink-4: #71717a;
+  --color-ink-5: #a1a1aa;
+
+  --color-danger-hover: #b91c1c;
+  --color-danger-ink: #dc2626;
+  --color-danger-edge: #fca5a5;
+  --color-danger-soft: #fee2e2;
+  --color-warn: #b45309;
 }
 
 html,
@@ -14,8 +68,8 @@ body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   font-size: 13px;
-  background: #0f1115;
-  color: #d4d4d8;
+  background: var(--color-app);
+  color: var(--color-ink-2);
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
@@ -39,14 +93,14 @@ textarea {
   position: relative;
   height: 2px;
   overflow: hidden;
-  background: #27272a;
+  background: var(--color-raised);
 }
 .scan-progress::after {
   content: "";
   position: absolute;
   inset: 0;
   width: 35%;
-  background: #14b8a6;
+  background: var(--color-accent);
   animation: scan-progress-slide 1.1s ease-in-out infinite;
 }
 @keyframes scan-progress-slide {

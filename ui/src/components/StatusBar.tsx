@@ -25,13 +25,13 @@ function stateLabel(snapshot: Snapshot | null): string {
 export function StatusBar({ snapshot, selectedPath, uiError }: StatusBarProps) {
   const state = snapshot?.state;
   return (
-    <footer className="flex h-7 items-center gap-3 border-t border-zinc-800 px-3 text-xs text-zinc-500">
+    <footer className="flex h-7 items-center gap-3 border-t border-edge px-3 text-xs text-ink-4">
       <span
         className={`shrink-0 ${
           state === "failed"
-            ? "text-red-400"
+            ? "text-danger-ink"
             : state === "scanning"
-              ? "text-teal-400"
+              ? "text-accent-ink"
               : ""
         }`}
       >
@@ -39,19 +39,19 @@ export function StatusBar({ snapshot, selectedPath, uiError }: StatusBarProps) {
       </span>
       {uiError && (
         <span
-          className="max-w-96 shrink-0 truncate text-red-400"
+          className="max-w-96 shrink-0 truncate text-danger-ink"
           title={uiError}
         >
           {uiError}
         </span>
       )}
       {snapshot !== null && snapshot.errors > 0 && (
-        <span className="tnum shrink-0 text-amber-500/90">
+        <span className="tnum shrink-0 text-warn/90">
           {formatNumber(snapshot.errors)} unreadable
         </span>
       )}
       <span
-        className="min-w-0 flex-1 truncate text-center text-zinc-600"
+        className="min-w-0 flex-1 truncate text-center text-ink-5"
         title={selectedPath ?? undefined}
       >
         {selectedPath ?? ""}

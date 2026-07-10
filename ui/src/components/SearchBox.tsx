@@ -127,11 +127,11 @@ export function SearchBox({
         title={
           "Space-separated filters, all must match:\nname substring · ext:mp4 · >100mb"
         }
-        className="h-8 w-56 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-[13px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-teal-700 disabled:opacity-40"
+        className="h-8 w-56 rounded-md border border-edge bg-panel px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-5 focus:border-accent-edge disabled:opacity-40"
       />
       {open && results && (
-        <div className="absolute top-9 right-0 z-50 w-[26rem] overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 shadow-xl">
-          <div className="border-b border-zinc-800 px-3 py-1 text-[11px] text-zinc-500">
+        <div className="absolute top-9 right-0 z-50 w-[26rem] overflow-hidden rounded-md border border-edge-strong bg-panel shadow-xl">
+          <div className="border-b border-edge px-3 py-1 text-[11px] text-ink-4">
             {results.total === 0
               ? "No matches"
               : results.hits.length < results.total
@@ -145,7 +145,7 @@ export function SearchBox({
                   key={h.id}
                   data-i={i}
                   className={`flex w-full items-center gap-2 px-3 py-1 text-left text-xs ${
-                    i === active ? "bg-zinc-800" : ""
+                    i === active ? "bg-raised" : ""
                   }`}
                   onMouseMove={() => setActive(i)}
                   onClick={() => choose(h)}
@@ -153,15 +153,15 @@ export function SearchBox({
                 >
                   <span
                     className={`max-w-[50%] shrink-0 truncate ${
-                      h.isDir ? "text-zinc-100" : "text-zinc-300"
+                      h.isDir ? "text-ink" : "text-ink-2"
                     }`}
                   >
                     {h.name}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-600">
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-ink-5">
                     {parentDir(h.path)}
                   </span>
-                  <span className="tnum shrink-0 text-zinc-400">
+                  <span className="tnum shrink-0 text-ink-3">
                     {formatBytes(h.size)}
                   </span>
                 </button>

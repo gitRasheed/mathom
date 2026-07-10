@@ -99,10 +99,10 @@ function TreeRow({
       style={{ ...style, display: "grid", gridTemplateColumns: cols.template }}
       className={`items-center text-[13px] ${
         isSelected
-          ? "bg-zinc-800/80"
+          ? "bg-raised/80"
           : isHovered
-            ? "bg-teal-900/25"
-            : "hover:bg-zinc-900"
+            ? "bg-accent-soft/25"
+            : "hover:bg-hush"
       }`}
       onClick={() => onSelect(row)}
       onDoubleClick={() => {
@@ -120,7 +120,7 @@ function TreeRow({
       >
         {row.isDir && row.hasChildren ? (
           <button
-            className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-200"
+            className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center text-ink-4 hover:text-ink"
             onClick={(e) => {
               e.stopPropagation();
               onToggle(row.id);
@@ -140,14 +140,14 @@ function TreeRow({
           <span className="mr-1 h-4 w-4 shrink-0" />
         )}
         <span
-          className={`truncate ${row.isDir ? "text-zinc-100" : "text-zinc-400"}`}
+          className={`truncate ${row.isDir ? "text-ink" : "text-ink-3"}`}
           title={row.name}
         >
           {row.name}
         </span>
         {row.isReparse && (
           <span
-            className="ml-1.5 shrink-0 text-[10px] text-zinc-600"
+            className="ml-1.5 shrink-0 text-[10px] text-ink-5"
             title="Junction / symlink — not followed"
           >
             link
@@ -155,14 +155,14 @@ function TreeRow({
         )}
         {row.isError && (
           <span
-            className="ml-1.5 shrink-0 text-[10px] text-red-400/80"
+            className="ml-1.5 shrink-0 text-[10px] text-danger-ink/80"
             title="Could not read this directory"
           >
             !
           </span>
         )}
       </div>
-      <div className="tnum pr-3 text-right text-zinc-300">
+      <div className="tnum pr-3 text-right text-ink-2">
         {formatBytes(row.size)}
       </div>
       {cols.pct &&
@@ -171,24 +171,24 @@ function TreeRow({
           <div />
         ) : (
           <div className="flex items-center gap-2 pr-3">
-            <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-sm bg-zinc-800">
+            <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-sm bg-raised">
               <div
-                className="h-full rounded-sm bg-teal-600/80"
+                className="h-full rounded-sm bg-accent/80"
                 style={{ width: `${Math.min(100, row.pct * 100)}%` }}
               />
             </div>
-            <span className="tnum w-11 shrink-0 text-right text-[11px] text-zinc-500">
+            <span className="tnum w-11 shrink-0 text-right text-[11px] text-ink-4">
               {formatPercent(row.pct)}
             </span>
           </div>
         ))}
       {cols.items && (
-        <div className="tnum pr-3 text-right text-zinc-500">
+        <div className="tnum pr-3 text-right text-ink-4">
           {row.isDir ? formatNumber(row.items) : ""}
         </div>
       )}
       {cols.mtime && (
-        <div className="tnum pr-3 text-right text-zinc-500">
+        <div className="tnum pr-3 text-right text-ink-4">
           {formatDate(row.mtime)}
         </div>
       )}
@@ -210,13 +210,13 @@ function Header({
       <span className="ml-1 text-[9px]">{sort.desc ? "▼" : "▲"}</span>
     ) : null;
   const cls = (align: "left" | "right") =>
-    `flex items-center py-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-500 hover:text-zinc-300 ${
+    `flex items-center py-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-4 hover:text-ink-2 ${
       align === "right" ? "justify-end pr-3" : "pl-7"
     }`;
 
   return (
     <div
-      className="border-b border-zinc-800"
+      className="border-b border-edge"
       style={{ display: "grid", gridTemplateColumns: cols.template }}
     >
       <button className={cls("left")} onClick={() => onSort("name")}>
@@ -226,7 +226,7 @@ function Header({
         Size{arrow("size")}
       </button>
       {cols.pct && (
-        <span className="flex items-center justify-end py-1.5 pr-3 text-[11px] font-medium tracking-wide text-zinc-600 uppercase">
+        <span className="flex items-center justify-end py-1.5 pr-3 text-[11px] font-medium tracking-wide text-ink-5 uppercase">
           % of parent
         </span>
       )}

@@ -46,15 +46,15 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     >
       <div
         ref={menuRef}
-        className="absolute min-w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 text-[13px] shadow-xl"
+        className="absolute min-w-44 rounded-md border border-edge-strong bg-panel py-1 text-[13px] shadow-xl"
         style={{ left: pos.x, top: pos.y }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {items.map((item, i) => (
           <button
             key={i}
-            className={`flex w-full items-center px-3 py-1.5 text-left hover:bg-zinc-800 ${
-              item.danger ? "text-red-400" : "text-zinc-200"
+            className={`flex w-full items-center px-3 py-1.5 text-left hover:bg-raised ${
+              item.danger ? "text-danger-ink" : "text-ink"
             }`}
             onClick={() => {
               item.onClick();

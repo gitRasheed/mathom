@@ -7,6 +7,7 @@ import { TreeView } from "./components/TreeView";
 import { Treemap } from "./components/Treemap";
 import { TypePanel } from "./components/TypePanel";
 import { useScan } from "./hooks/useScan";
+import { useTheme } from "./hooks/useTheme";
 import {
   api,
   type ElevationStatus,
@@ -31,6 +32,7 @@ const targetFrom = (r: Row): DeleteTarget => ({
 
 export default function App() {
   const scan = useScan();
+  const theme = useTheme();
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewRootId, setViewRootId] = useState(0);
@@ -301,11 +303,15 @@ export default function App() {
         startError={scan.startError}
         hideSystem={scan.hideSystem}
         typePanelOpen={typePanelOpen}
+        themePref={theme.pref}
+        accent={theme.accent}
         onScan={handleScan}
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
         onToggleTypePanel={() => setTypePanelOpen((v) => !v)}
         onSearchSelect={handleSearchSelect}
+        onThemePref={theme.setPref}
+        onAccent={theme.setAccent}
       />
       {elevation !== null && !elevation.elevated && !elevationDismissed && (
         <ElevationBanner
@@ -347,7 +353,7 @@ export default function App() {
             />
           </div>
           <div
-            className="w-1 shrink-0 cursor-col-resize border-l border-zinc-800 hover:bg-teal-700/60"
+            className="w-1 shrink-0 cursor-col-resize border-l border-edge hover:bg-accent-edge/60"
             onMouseDown={startDivider}
           />
           <Treemap
@@ -355,6 +361,7 @@ export default function App() {
             generation={generation}
             rootId={viewRootId}
             revision={treeRevision}
+            themeRev={theme.themeRev}
             hideSystem={scan.hideSystem}
             selected={selected}
             hoveredId={hoveredId}
@@ -419,22 +426,22 @@ function ElevationBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-1.5 text-xs">
-      <span className="min-w-0 truncate text-zinc-400">
+    <div className="flex shrink-0 items-center gap-3 border-b border-edge bg-panel/70 px-3 py-1.5 text-xs">
+      <span className="min-w-0 truncate text-ink-3">
         Running without administrator rights — scans use the slower folder
         walker and skip files it can't read.
         {devBuild && " Start the dev loop from an elevated terminal instead."}
       </span>
       {!devBuild && (
         <button
-          className="shrink-0 rounded border border-teal-700/60 px-2 py-0.5 text-teal-300 hover:bg-teal-900/40"
+          className="shrink-0 rounded border border-accent-edge/60 px-2 py-0.5 text-accent-ink hover:bg-accent-soft/40"
           onClick={onRelaunch}
         >
           Relaunch as administrator
         </button>
       )}
       <button
-        className="ml-auto shrink-0 px-1 text-zinc-600 hover:text-zinc-300"
+        className="ml-auto shrink-0 px-1 text-ink-5 hover:text-ink-2"
         onClick={onDismiss}
         aria-label="Dismiss"
       >
@@ -449,15 +456,15 @@ function EmptyState({ snapshot }: { snapshot: Snapshot | null }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
       {failed ? (
-        <p className="text-sm text-red-400">
+        <p className="text-sm text-danger-ink">
           Scan failed: {snapshot?.rootError ?? "unknown error"}
         </p>
       ) : (
         <div className="text-center">
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-ink-3">
             Choose a folder and start a scan.
           </p>
-          <p className="mt-1.5 text-xs text-zinc-600">
+          <p className="mt-1.5 text-xs text-ink-5">
             The tree and treemap fill in live while the scan runs.
           </p>
         </div>

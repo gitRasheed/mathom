@@ -71,21 +71,21 @@ export function TypePanel({
   }, [snapshot, generation, fetchStats]);
 
   return (
-    <div className="flex w-64 shrink-0 flex-col border-l border-zinc-800">
-      <div className="flex h-8 shrink-0 items-center border-b border-zinc-800 px-3">
-        <span className="text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
+    <div className="flex w-64 shrink-0 flex-col border-l border-edge">
+      <div className="flex h-8 shrink-0 items-center border-b border-edge px-3">
+        <span className="text-[11px] font-medium tracking-wide text-ink-4 uppercase">
           File types
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
         {data === null ? (
           generation === 0 ? (
-            <div className="px-3 py-2 text-xs text-zinc-600">
+            <div className="px-3 py-2 text-xs text-ink-5">
               Appears during a scan
             </div>
           ) : null
         ) : data.totalFiles === 0 ? (
-          <div className="px-3 py-2 text-xs text-zinc-600">No files here</div>
+          <div className="px-3 py-2 text-xs text-ink-5">No files here</div>
         ) : (
           <>
             {data.types.map((t) => (
@@ -111,21 +111,21 @@ export function TypePanel({
             )}
             {data.topFiles.length > 0 && (
               <>
-                <div className="mt-3 border-b border-zinc-800 px-3 pb-1.5 text-[11px] font-medium tracking-wide text-zinc-500 uppercase">
+                <div className="mt-3 border-b border-edge px-3 pb-1.5 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
                   Largest files
                 </div>
                 <div className="pt-1">
                   {data.topFiles.map((f) => (
                     <button
                       key={f.id}
-                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-zinc-900"
+                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-hush"
                       onClick={() => onSelectFile(f)}
                       title={f.name}
                     >
-                      <span className="min-w-0 flex-1 truncate text-zinc-300">
+                      <span className="min-w-0 flex-1 truncate text-ink-2">
                         {f.name}
                       </span>
-                      <span className="tnum shrink-0 text-zinc-500">
+                      <span className="tnum shrink-0 text-ink-4">
                         {formatBytes(f.size)}
                       </span>
                     </button>
@@ -159,17 +159,17 @@ function TypeRow({
         className="h-2 w-2 shrink-0 rounded-[3px]"
         style={{ background: color }}
       />
-      <span className="min-w-0 flex-1 truncate text-zinc-300">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-ink-2">{label}</span>
       <span
-        className="tnum shrink-0 text-[11px] text-zinc-600"
+        className="tnum shrink-0 text-[11px] text-ink-5"
         title={`${formatNumber(files)} files`}
       >
         {formatNumber(files)}
       </span>
-      <span className="tnum w-16 shrink-0 text-right text-zinc-400">
+      <span className="tnum w-16 shrink-0 text-right text-ink-3">
         {formatBytes(bytes)}
       </span>
-      <span className="tnum w-9 shrink-0 text-right text-[11px] text-zinc-600">
+      <span className="tnum w-9 shrink-0 text-right text-[11px] text-ink-5">
         {formatPercent(pct)}
       </span>
     </div>

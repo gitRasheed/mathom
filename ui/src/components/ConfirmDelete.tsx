@@ -71,36 +71,34 @@ export function ConfirmDelete({
       }}
     >
       <div
-        className="w-[420px] max-w-[92vw] rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
+        className="w-[420px] max-w-[92vw] rounded-lg border border-edge-strong bg-panel p-5 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <h2 className="text-sm font-semibold text-zinc-100">
-          Delete this {kind}?
-        </h2>
+        <h2 className="text-sm font-semibold text-ink">Delete this {kind}?</h2>
 
-        <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+        <div className="mt-3 rounded-md border border-edge bg-app/60 px-3 py-2">
           <div
-            className="truncate text-[13px] font-medium text-zinc-200"
+            className="truncate text-[13px] font-medium text-ink"
             title={target.name}
           >
             {target.name}
           </div>
           <div
-            className="mt-0.5 truncate text-[11px] text-zinc-500"
+            className="mt-0.5 truncate text-[11px] text-ink-4"
             title={preflight?.path ?? undefined}
           >
             {preflight?.path ?? "…"}
           </div>
-          <div className="tnum mt-1 text-[11px] text-zinc-500">
+          <div className="tnum mt-1 text-[11px] text-ink-4">
             {formatBytes(target.size)}
             {target.isDir && ` · ${formatNumber(target.items)} items`}
           </div>
         </div>
 
-        <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-zinc-400">
+        <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-ink-3">
           <input
             type="checkbox"
-            className="accent-red-500"
+            className="accent-danger"
             checked={permanent}
             disabled={busy || blocked !== null}
             onChange={(e) => onPermanentChange(e.target.checked)}
@@ -110,11 +108,7 @@ export function ConfirmDelete({
 
         <p
           className={`mt-2 text-[11px] ${
-            blocked
-              ? "text-amber-400"
-              : permanent
-                ? "text-red-400"
-                : "text-zinc-500"
+            blocked ? "text-warn" : permanent ? "text-danger-ink" : "text-ink-4"
           }`}
         >
           {blocked ??
@@ -126,7 +120,7 @@ export function ConfirmDelete({
         <div className="mt-4 flex justify-end gap-2">
           <button
             ref={cancelRef}
-            className="rounded-md border border-zinc-700 px-3 py-1.5 text-[13px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            className="rounded-md border border-edge-strong px-3 py-1.5 text-[13px] text-ink-2 hover:bg-raised disabled:opacity-50"
             disabled={busy}
             onClick={onCancel}
           >
@@ -135,8 +129,8 @@ export function ConfirmDelete({
           <button
             className={`rounded-md px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-60 ${
               permanent
-                ? "bg-red-600 hover:bg-red-500"
-                : "bg-teal-600 hover:bg-teal-500"
+                ? "bg-danger hover:bg-danger-hover"
+                : "bg-accent hover:bg-accent-hover"
             }`}
             disabled={busy || preflight === null || blocked !== null}
             onClick={onConfirm}
