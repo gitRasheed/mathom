@@ -17,14 +17,13 @@ pub struct TypeStat {
 
 #[derive(Clone, Debug, Default)]
 pub struct TypeBreakdown {
+    /// Every extension in the subtree, largest first.
     pub types: Vec<TypeStat>,
-    pub other_bytes: u64,
-    pub other_files: u64,
     pub total_bytes: u64,
     pub total_files: u64,
 }
 
-pub fn type_breakdown(tree: &Tree, root: NodeId, top: usize, hide_system: bool) -> TypeBreakdown {
+pub fn type_breakdown(tree: &Tree, root: NodeId, hide_system: bool) -> TypeBreakdown {
     let mut groups: HashMap<Option<ExtKey>, (u64, u64)> = HashMap::new();
     for_each_file(tree, root, hide_system, |id, size| {
         let g = groups.entry(extension_key(tree.name(id))).or_default();
@@ -52,11 +51,8 @@ pub fn type_breakdown(tree: &Tree, root: NodeId, top: usize, hide_system: bool) 
 
     let total_bytes = all.iter().map(|t| t.bytes).sum();
     let total_files = all.iter().map(|t| t.files).sum();
-    let rest = all.split_off(top.min(all.len()));
     TypeBreakdown {
         types: all,
-        other_bytes: rest.iter().map(|t| t.bytes).sum(),
-        other_files: rest.iter().map(|t| t.files).sum(),
         total_bytes,
         total_files,
     }
@@ -155,7 +151,7 @@ mod tests {
     #[test]
     fn breakdown_groups_by_lowercased_extension_sorted_by_bytes() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, 10, false);
+        let bd = type_breakdown(&tree, 0, false);
         let got: Vec<(&str, u64, u64)> = bd
             .types
             .iter()
@@ -173,14 +169,27 @@ mod tests {
         );
         assert_eq!(bd.total_bytes, 1687);
         assert_eq!(bd.total_files, 6);
-        assert_eq!(bd.other_bytes, 0);
-        assert_eq!(bd.other_files, 0);
+    }
+
+    #[test]
+    fn every_extension_is_listed_and_sums_reconcile_with_totals() {
+        let tree = sample();
+        let bd = type_breakdown(&tree, 0, false);
+        assert_eq!(bd.types.len(), 5); // sys, mkv, pdf, bin, no-extension
+        assert_eq!(
+            bd.types.iter().map(|t| t.bytes).sum::<u64>(),
+            bd.total_bytes
+        );
+        assert_eq!(
+            bd.types.iter().map(|t| t.files).sum::<u64>(),
+            bd.total_files
+        );
     }
 
     #[test]
     fn breakdown_categories_match_the_treemap_palette() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, 10, false);
+        let bd = type_breakdown(&tree, 0, false);
         let cat = |ext: &str| bd.types.iter().find(|t| ext_of(t) == ext).unwrap().category;
         assert_eq!(cat("mkv"), Category::Video);
         assert_eq!(cat("pdf"), Category::Document);
@@ -191,7 +200,7 @@ mod tests {
     #[test]
     fn breakdown_is_scoped_to_the_subtree() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 1, 10, false); // docs only
+        let bd = type_breakdown(&tree, 1, false); // docs only
         let got: Vec<(&str, u64)> = bd.types.iter().map(|t| (ext_of(t), t.bytes)).collect();
         assert_eq!(got, [("pdf", 150), ("", 8)]);
         assert_eq!(bd.total_bytes, 158);
@@ -200,23 +209,10 @@ mod tests {
     #[test]
     fn hide_system_prunes_system_subtrees() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, 10, true);
+        let bd = type_breakdown(&tree, 0, true);
         assert!(bd.types.iter().all(|t| ext_of(t) != "sys"));
         assert_eq!(bd.total_bytes, 688); // 1687 - pagefile.sys(999)
         assert_eq!(bd.total_files, 5);
-    }
-
-    #[test]
-    fn top_fold_reconciles_with_totals() {
-        let tree = sample();
-        let bd = type_breakdown(&tree, 0, 2, false);
-        assert_eq!(bd.types.len(), 2);
-        assert_eq!(bd.types[0].bytes, 999);
-        assert_eq!(bd.types[1].bytes, 500);
-        assert_eq!(bd.other_bytes, 188); // pdf 150 + bin 30 + none 8
-        assert_eq!(bd.other_files, 4);
-        let listed: u64 = bd.types.iter().map(|t| t.bytes).sum();
-        assert_eq!(listed + bd.other_bytes, bd.total_bytes);
     }
 
     #[test]
@@ -231,7 +227,7 @@ mod tests {
     #[test]
     fn unknown_root_yields_empty_results() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 999, 10, false);
+        let bd = type_breakdown(&tree, 999, false);
         assert!(bd.types.is_empty());
         assert_eq!(bd.total_files, 0);
         assert_eq!(largest_files(&tree, 999, 5, false), [] as [NodeId; 0]);

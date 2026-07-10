@@ -1,12 +1,20 @@
 // Extension breakdown + largest files for the treemap view root.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Row, type Snapshot, type TypePanelData } from "../lib/api";
+import { List, type RowComponentProps } from "react-window";
+import {
+  api,
+  type Row,
+  type Snapshot,
+  type TypePanelData,
+  type TypeStat,
+} from "../lib/api";
 import { isStale, reportUnlessStale } from "../lib/errors";
 import { formatBytes, formatNumber, formatPercent } from "../lib/format";
 import { PALETTE } from "../lib/palette";
 
 const SCAN_REFRESH_MS = 700;
+const TYPE_ROW_HEIGHT = 24;
 
 export interface TypePanelProps {
   snapshot: Snapshot | null;
@@ -77,7 +85,7 @@ export function TypePanel({
           File types
         </span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
+      <div className="min-h-0 flex-1 pt-1.5">
         {data === null ? (
           generation === 0 ? (
             <div className="px-3 py-2 text-xs text-ink-5">
@@ -87,90 +95,73 @@ export function TypePanel({
         ) : data.totalFiles === 0 ? (
           <div className="px-3 py-2 text-xs text-ink-5">No files here</div>
         ) : (
-          <>
-            {data.types.map((t) => (
-              <TypeRow
-                key={t.ext}
-                color={PALETTE[t.category] ?? PALETTE[10]}
-                label={t.ext === "" ? "(no extension)" : `.${t.ext}`}
-                files={t.files}
-                bytes={t.bytes}
-                pct={data.totalBytes > 0 ? t.bytes / data.totalBytes : 0}
-              />
-            ))}
-            {data.otherFiles > 0 && (
-              <TypeRow
-                color="transparent"
-                label="other"
-                files={data.otherFiles}
-                bytes={data.otherBytes}
-                pct={
-                  data.totalBytes > 0 ? data.otherBytes / data.totalBytes : 0
-                }
-              />
-            )}
-            {data.topFiles.length > 0 && (
-              <>
-                <div className="mt-3 border-b border-edge px-3 pb-1.5 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
-                  Largest files
-                </div>
-                <div className="pt-1">
-                  {data.topFiles.map((f) => (
-                    <button
-                      key={f.id}
-                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-hush"
-                      onClick={() => onSelectFile(f)}
-                      title={f.name}
-                    >
-                      <span className="min-w-0 flex-1 truncate text-ink-2">
-                        {f.name}
-                      </span>
-                      <span className="tnum shrink-0 text-ink-4">
-                        {formatBytes(f.size)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
+          <List
+            rowComponent={TypeRow}
+            rowCount={data.types.length}
+            rowHeight={TYPE_ROW_HEIGHT}
+            rowProps={{ types: data.types, totalBytes: data.totalBytes }}
+            className="h-full"
+          />
         )}
       </div>
+      {data !== null && data.topFiles.length > 0 && (
+        <div className="shrink-0 border-t border-edge pb-1.5">
+          <div className="px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
+            Largest files
+          </div>
+          {data.topFiles.map((f) => (
+            <button
+              key={f.id}
+              className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-hush"
+              onClick={() => onSelectFile(f)}
+              title={f.name}
+            >
+              <span className="min-w-0 flex-1 truncate text-ink-2">
+                {f.name}
+              </span>
+              <span className="tnum shrink-0 text-ink-4">
+                {formatBytes(f.size)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
+interface TypeRowsProps {
+  types: TypeStat[];
+  totalBytes: number;
+}
+
 function TypeRow({
-  color,
-  label,
-  files,
-  bytes,
-  pct,
-}: {
-  color: string;
-  label: string;
-  files: number;
-  bytes: number;
-  pct: number;
-}) {
+  index,
+  style,
+  types,
+  totalBytes,
+}: RowComponentProps<TypeRowsProps>) {
+  const t = types[index];
   return (
-    <div className="flex items-center gap-2 px-3 py-1 text-xs">
+    <div style={style} className="flex items-center gap-2 px-3 text-xs">
       <span
         className="h-2 w-2 shrink-0 rounded-[3px]"
-        style={{ background: color }}
+        style={{ background: PALETTE[t.category] ?? PALETTE[10] }}
       />
-      <span className="min-w-0 flex-1 truncate text-ink-2">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-ink-2">
+        {t.ext === "" ? "(no extension)" : `.${t.ext}`}
+      </span>
       <span
         className="tnum shrink-0 text-[11px] text-ink-5"
-        title={`${formatNumber(files)} files`}
+        title={`${formatNumber(t.files)} files`}
       >
-        {formatNumber(files)}
+        {formatNumber(t.files)}
       </span>
       <span className="tnum w-16 shrink-0 text-right text-ink-3">
-        {formatBytes(bytes)}
+        {formatBytes(t.bytes)}
       </span>
       <span className="tnum w-9 shrink-0 text-right text-[11px] text-ink-5">
-        {formatPercent(pct)}
+        {formatPercent(totalBytes > 0 ? t.bytes / totalBytes : 0)}
       </span>
     </div>
   );

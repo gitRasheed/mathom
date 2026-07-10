@@ -309,8 +309,6 @@ pub struct TypeStatDto {
 #[serde(rename_all = "camelCase")]
 pub struct TypePanelData {
     types: Vec<TypeStatDto>,
-    other_bytes: u64,
-    other_files: u64,
     total_bytes: u64,
     total_files: u64,
     top_files: Vec<Row>,
@@ -323,7 +321,6 @@ pub fn get_type_stats(
     root_id: NodeId,
     hide_system: bool,
 ) -> Result<TypePanelData, String> {
-    const TOP_TYPES: usize = 12;
     const TOP_FILES: usize = 8;
 
     let session = session_for(&state, generation)?;
@@ -333,7 +330,7 @@ pub fn get_type_stats(
         return Err("unknown node".into());
     }
 
-    let bd = mathom_core::stats::type_breakdown(tree, root_id, TOP_TYPES, hide_system);
+    let bd = mathom_core::stats::type_breakdown(tree, root_id, hide_system);
     let subtree_total = bd.total_bytes;
     let top_files = mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system)
         .into_iter()
@@ -350,8 +347,6 @@ pub fn get_type_stats(
                 files: t.files,
             })
             .collect(),
-        other_bytes: bd.other_bytes,
-        other_files: bd.other_files,
         total_bytes: bd.total_bytes,
         total_files: bd.total_files,
         top_files,
