@@ -48,7 +48,11 @@ export function Toolbar({
       directory: true,
       title: "Choose a folder to scan",
     });
-    if (typeof picked === "string") setPath(picked);
+    if (typeof picked === "string") {
+      setPath(picked);
+      // Picking from the dialog is the intent to scan it; no second click.
+      if (!scanning) onScan(picked);
+    }
   };
 
   const canScan = path.trim().length > 0 && !scanning;
