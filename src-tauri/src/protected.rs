@@ -1,9 +1,12 @@
 //! Delete-boundary policy: paths Windows itself depends on.
 //!
 //! Blocks the OS structures living at a volume root ($Recycle.Bin, System
-//! Volume Information, the paging files) and the Windows directory itself.
-//! Their *contents* stay deletable — clearing orphaned recycle-bin data is a
-//! legitimate use — and NTFS ACLs still guard individual system files. The
+//! Volume Information, the paging files), the Windows directory itself, and
+//! the well-known critical dirs inside it (System32 etc.) including their
+//! contents — nothing in those is ever legitimate cleanup. Everything else
+//! under Windows (Temp, SoftwareDistribution, Logs) and the contents of the
+//! volume-root entries stay deletable — clearing orphaned recycle-bin data is
+//! a legitimate use — and NTFS ACLs still guard individual system files. The
 //! check is string-level and runs before the filesystem call: mathom usually
 //! runs elevated, so "the OS will refuse" is not a safety net here.
 
@@ -27,12 +30,40 @@ fn block_reason(path: &str, system_root: Option<&str>) -> Option<String> {
         }
     }
 
-    if let Some(root) = system_root
-        && trimmed.eq_ignore_ascii_case(root.trim_end_matches(['\\', '/']))
-    {
-        return Some("the Windows directory can't be deleted".into());
+    if let Some(root) = system_root {
+        let root = root.trim_end_matches(['\\', '/']);
+        if trimmed.eq_ignore_ascii_case(root) {
+            return Some("the Windows directory can't be deleted".into());
+        }
+        if let Some(rest) = strip_dir_prefix(trimmed, root) {
+            let name = rest.split(['\\', '/']).next().unwrap_or(rest);
+            if CRITICAL_WINDOWS_DIRS
+                .iter()
+                .any(|d| name.eq_ignore_ascii_case(d))
+            {
+                return Some(if name.len() == rest.len() {
+                    format!("{name} is part of Windows and can't be deleted")
+                } else {
+                    format!("items inside {name} are part of Windows and can't be deleted")
+                });
+            }
+        }
     }
     None
+}
+
+/// Direct children of the Windows directory that are blocked wholesale,
+/// contents included. Everything else under Windows stays deletable.
+const CRITICAL_WINDOWS_DIRS: [&str; 5] = ["System32", "SysWOW64", "WinSxS", "Boot", "Fonts"];
+
+/// `C:\Windows\System32\x` with prefix `C:\Windows` → `Some("System32\x")`;
+/// equal or unrelated paths → `None`.
+fn strip_dir_prefix<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    if path.len() <= prefix.len() {
+        return None;
+    }
+    let (head, tail) = path.split_at(prefix.len());
+    (head.eq_ignore_ascii_case(prefix) && tail.starts_with(['\\', '/'])).then(|| &tail[1..])
 }
 
 /// `C:\$Recycle.Bin` → `Some("$Recycle.Bin")`; deeper or relative paths → `None`.
@@ -71,14 +102,38 @@ mod tests {
     }
 
     #[test]
-    fn blocks_the_windows_directory_itself_only() {
+    fn blocks_the_windows_directory_itself() {
         assert!(block_reason("C:\\Windows", SYSROOT).is_some());
         assert!(block_reason("c:\\WINDOWS\\", SYSROOT).is_some());
         // Same name on another drive is just a folder.
         assert!(block_reason("D:\\Windows", SYSROOT).is_none());
-        // Contents stay deletable (Temp cleanup is legitimate; ACLs guard
-        // the rest).
+    }
+
+    #[test]
+    fn blocks_critical_windows_dirs_and_their_contents() {
+        assert!(block_reason("C:\\Windows\\System32", SYSROOT).is_some());
+        assert!(block_reason("c:\\windows\\system32\\drivers", SYSROOT).is_some());
+        assert!(block_reason("C:\\Windows\\SysWOW64", SYSROOT).is_some());
+        assert!(block_reason("C:\\Windows\\WinSxS\\amd64_microsoft-windows", SYSROOT).is_some());
+        assert!(block_reason("C:\\Windows\\Boot\\", SYSROOT).is_some());
+        assert!(block_reason("C:\\Windows\\Fonts\\arial.ttf", SYSROOT).is_some());
+    }
+
+    #[test]
+    fn temp_class_paths_inside_windows_stay_deletable() {
         assert!(block_reason("C:\\Windows\\Temp", SYSROOT).is_none());
+        assert!(block_reason("C:\\Windows\\Temp\\junk.tmp", SYSROOT).is_none());
+        assert!(block_reason("C:\\Windows\\SoftwareDistribution\\Download", SYSROOT).is_none());
+        assert!(block_reason("C:\\Windows\\Logs", SYSROOT).is_none());
+    }
+
+    #[test]
+    fn critical_dir_lookalikes_elsewhere_stay_deletable() {
+        assert!(block_reason("D:\\Windows\\System32", SYSROOT).is_none());
+        assert!(block_reason("C:\\backup\\Windows\\System32", SYSROOT).is_none());
+        assert!(block_reason("C:\\System32", SYSROOT).is_none());
+        // "C:\Windows2" shares a prefix with the system root but isn't it.
+        assert!(block_reason("C:\\Windows2\\System32", SYSROOT).is_none());
     }
 
     #[test]
