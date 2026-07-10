@@ -31,6 +31,30 @@ const SCAN_REFRESH_MS = 400;
 const ZOOM_MS = 220;
 const TOOLTIP_DELAY_MS = 120;
 
+// Grain tile for directory plates. By the layout's contract, culled children
+// still consume their share of space, so every bare plate pixel is real bytes
+// too small to draw — the grain makes that read as "many small files" instead
+// of dead space. Drawn tiles paint over it, so it shows only where content
+// was culled.
+const GRAIN_PITCH = 4;
+
+let grainTile: { key: string; canvas: HTMLCanvasElement } | null = null;
+
+function getGrainTile(plate: string, grain: string): HTMLCanvasElement {
+  const key = `${plate}|${grain}`;
+  if (grainTile?.key === key) return grainTile.canvas;
+  const c = document.createElement("canvas");
+  c.width = GRAIN_PITCH;
+  c.height = GRAIN_PITCH;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = plate;
+  ctx.fillRect(0, 0, GRAIN_PITCH, GRAIN_PITCH);
+  ctx.fillStyle = grain;
+  ctx.fillRect(1, 1, 1, 1);
+  grainTile = { key, canvas: c };
+  return c;
+}
+
 let highlightSprite: HTMLCanvasElement | null = null;
 
 function getHighlightSprite(): HTMLCanvasElement {
@@ -209,7 +233,10 @@ export function Treemap({
     ctx.fillStyle = theme.background;
     ctx.fillRect(0, 0, off.width, off.height);
 
-    ctx.fillStyle = theme.plate;
+    ctx.fillStyle = ctx.createPattern(
+      getGrainTile(theme.plate, theme.plateGrain),
+      "repeat",
+    )!;
     ctx.beginPath();
     for (const r of rects) {
       if (!r.isDir) continue;
