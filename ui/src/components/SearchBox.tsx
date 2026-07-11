@@ -145,6 +145,9 @@ export function SearchBox({
       } else if (canFilter && text.trim() !== "") {
         onApplyFilter(text.trim());
         setOpen(false);
+      } else if (canFilter && text.trim() === "") {
+        // Enter always applies the box's query; an empty query is no filter.
+        onApplyFilter(null);
       } else if (open && hits.length > 0) {
         // Mid-scan there is no filtering; Enter opens the top match.
         choose(hits[active] ?? hits[0]);
