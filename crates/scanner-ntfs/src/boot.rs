@@ -75,6 +75,80 @@ pub fn plan_mft_read(
     }
 }
 
+/// One volume read: a whole number of records, within a single extent,
+/// at most the buffer size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadChunk {
+    pub disk_offset: u64,
+    pub first_record: usize,
+    pub bytes: usize,
+}
+
+/// Tiles the $MFT's records into [`ReadChunk`]s in record order. Callers
+/// must have validated extents and sizes via [`plan_mft_read`]; cluster
+/// size must be a record multiple (checked by `map_mft`), which keeps every
+/// chunk record- and sector-aligned as `FILE_FLAG_NO_BUFFERING` demands.
+pub struct ReadChunks<'a> {
+    extents: std::slice::Iter<'a, Extent>,
+    cluster_size: u64,
+    record_size: u64,
+    buf_bytes: u64,
+    remaining: u64,
+    next_record: usize,
+    cur: Option<(u64, u64)>, // (disk offset, bytes left in this extent)
+}
+
+impl<'a> ReadChunks<'a> {
+    pub fn new(
+        extents: &'a [Extent],
+        cluster_size: u32,
+        record_size: u32,
+        total_records: u32,
+        buf_bytes: usize,
+    ) -> Self {
+        assert!((buf_bytes as u64).is_multiple_of(record_size as u64) && buf_bytes > 0);
+        ReadChunks {
+            extents: extents.iter(),
+            cluster_size: cluster_size as u64,
+            record_size: record_size as u64,
+            buf_bytes: buf_bytes as u64,
+            remaining: total_records as u64 * record_size as u64,
+            next_record: 0,
+            cur: None,
+        }
+    }
+}
+
+impl Iterator for ReadChunks<'_> {
+    type Item = ReadChunk;
+
+    fn next(&mut self) -> Option<ReadChunk> {
+        loop {
+            if self.remaining == 0 {
+                return None;
+            }
+            match self.cur {
+                Some((offset, left)) if left > 0 => {
+                    let bytes = self.buf_bytes.min(left).min(self.remaining);
+                    let chunk = ReadChunk {
+                        disk_offset: offset,
+                        first_record: self.next_record,
+                        bytes: bytes as usize,
+                    };
+                    self.cur = Some((offset + bytes, left - bytes));
+                    self.remaining -= bytes;
+                    self.next_record += (bytes / self.record_size) as usize;
+                    return Some(chunk);
+                }
+                _ => {
+                    let e = self.extents.next()?;
+                    self.cur = Some((e.lcn * self.cluster_size, e.clusters * self.cluster_size));
+                }
+            }
+        }
+    }
+}
+
 pub fn parse_boot_sector(sector: &[u8]) -> Result<Geometry, ParseError> {
     if sector.len() < 512 {
         return Err(ParseError("boot sector shorter than 512 bytes"));
@@ -299,6 +373,57 @@ mod tests {
             plan_mft_read(&g, &[], u64::MAX, dev),
             Err(ParseError("$MFT extent map is empty"))
         );
+    }
+
+    /// 4 KiB clusters, 1 KiB records, 8 KiB buffer, two fragments: chunks
+    /// must tile records 0..total in order, never cross an extent, and the
+    /// tail must stop at total_records even though the extents cover more.
+    #[test]
+    fn read_chunks_tile_a_fragmented_mft_in_record_order() {
+        let extents = [
+            Extent {
+                lcn: 100,
+                clusters: 3,
+            }, // 12 KiB
+            Extent {
+                lcn: 500,
+                clusters: 2,
+            }, // 8 KiB
+        ];
+        let chunks: Vec<ReadChunk> = ReadChunks::new(&extents, 4096, 1024, 18, 8192).collect();
+        assert_eq!(
+            chunks,
+            vec![
+                ReadChunk {
+                    disk_offset: 100 * 4096,
+                    first_record: 0,
+                    bytes: 8192
+                },
+                ReadChunk {
+                    disk_offset: 100 * 4096 + 8192,
+                    first_record: 8,
+                    bytes: 4096
+                },
+                ReadChunk {
+                    disk_offset: 500 * 4096,
+                    first_record: 12,
+                    bytes: 6144
+                },
+            ]
+        );
+        let total: usize = chunks.iter().map(|c| c.bytes).sum();
+        assert_eq!(total, 18 * 1024, "exactly total_records worth of bytes");
+    }
+
+    #[test]
+    fn read_chunks_stop_when_extents_run_out_early() {
+        let extents = [Extent {
+            lcn: 10,
+            clusters: 1,
+        }]; // 4 KiB, but 8 records claimed
+        let chunks: Vec<ReadChunk> = ReadChunks::new(&extents, 4096, 1024, 8, 65536).collect();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].bytes, 4096, "reads only what the map covers");
     }
 
     #[test]

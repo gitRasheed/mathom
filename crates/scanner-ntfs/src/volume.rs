@@ -4,16 +4,20 @@
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::path::Path;
 
-use windows::Win32::Foundation::ERROR_MORE_DATA;
+use windows::Win32::Foundation::{ERROR_IO_PENDING, ERROR_MORE_DATA, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_NO_BUFFERING, FILE_FLAG_SEQUENTIAL_SCAN, FILE_READ_ATTRIBUTES,
-    FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetVolumeInformationW,
-    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, OPEN_EXISTING, ReadFile, SYNCHRONIZE,
+    CreateFileW, FILE_FLAG_NO_BUFFERING, FILE_FLAG_OVERLAPPED, FILE_FLAG_SEQUENTIAL_SCAN,
+    FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GetVolumeInformationW, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, OPEN_EXISTING,
+    ReadFile, SYNCHRONIZE,
 };
-use windows::Win32::System::IO::{DeviceIoControl, OVERLAPPED};
+use windows::Win32::System::IO::{CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Ioctl::{
     FSCTL_GET_RETRIEVAL_POINTERS, GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO,
     RETRIEVAL_POINTERS_BUFFER, RETRIEVAL_POINTERS_BUFFER_0, STARTING_VCN_INPUT_BUFFER,
+};
+use windows::Win32::System::Threading::{
+    CreateEventW, INFINITE, ResetEvent, WaitForMultipleObjects,
 };
 use windows::core::{Owned, PCWSTR};
 
@@ -127,7 +131,7 @@ impl Volume {
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 None,
                 OPEN_EXISTING,
-                FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN,
+                FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OVERLAPPED,
                 None,
             )
         }
@@ -138,26 +142,33 @@ impl Volume {
         })
     }
 
+    /// Synchronous-style read on the (overlapped) handle: submit, then wait
+    /// on a private event. Setup reads only — the sweep uses [`ReadRing`].
     pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<(), String> {
-        let mut overlapped = OVERLAPPED::default();
-        overlapped.Anonymous.Anonymous.Offset = offset as u32;
-        overlapped.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
-        let mut read = 0u32;
-        // SAFETY: buffer and overlapped outlive the synchronous call.
+        let len = buf.len();
+        let fail = |e: windows::core::Error| format!("read {len} bytes at {offset}: {e}");
+        // SAFETY: fresh event, owned; buffer and overlapped outlive the
+        // bWait=true completion below.
         unsafe {
-            ReadFile(
-                *self.handle,
-                Some(buf),
-                Some(&mut read),
-                Some(&mut overlapped),
-            )
-        }
-        .map_err(|e| format!("read {} bytes at {offset}: {e}", buf.len()))?;
-        if read as usize != buf.len() {
-            return Err(format!(
-                "short volume read at {offset}: {read} of {} bytes",
-                buf.len()
-            ));
+            let event = Owned::new(CreateEventW(None, true, false, None).map_err(fail)?);
+            let mut overlapped = OVERLAPPED {
+                hEvent: *event,
+                ..Default::default()
+            };
+            overlapped.Anonymous.Anonymous.Offset = offset as u32;
+            overlapped.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
+            match ReadFile(*self.handle, Some(buf), None, Some(&mut overlapped)) {
+                Ok(()) => {}
+                Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {}
+                Err(e) => return Err(fail(e)),
+            }
+            let mut read = 0u32;
+            GetOverlappedResult(*self.handle, &overlapped, &mut read, true).map_err(fail)?;
+            if read as usize != len {
+                return Err(format!(
+                    "short volume read at {offset}: {read} of {len} bytes"
+                ));
+            }
         }
         Ok(())
     }
@@ -167,10 +178,17 @@ impl Volume {
     pub fn length(&self) -> Result<u64, String> {
         let mut info = GET_LENGTH_INFORMATION::default();
         let mut written = 0u32;
-        // SAFETY: the out-pointer is a valid GET_LENGTH_INFORMATION for the
-        // duration of the call.
+        let fail = |e: windows::core::Error| format!("volume length: {e}");
+        // SAFETY: out-pointer and OVERLAPPED are valid through the waited
+        // completion. The overlapped handle makes the OVERLAPPED mandatory
+        // even for this normally-synchronous ioctl.
         unsafe {
-            DeviceIoControl(
+            let event = Owned::new(CreateEventW(None, true, false, None).map_err(fail)?);
+            let mut overlapped = OVERLAPPED {
+                hEvent: *event,
+                ..Default::default()
+            };
+            match DeviceIoControl(
                 *self.handle,
                 IOCTL_DISK_GET_LENGTH_INFO,
                 None,
@@ -178,10 +196,16 @@ impl Volume {
                 Some(&mut info as *mut _ as *mut _),
                 size_of::<GET_LENGTH_INFORMATION>() as u32,
                 Some(&mut written),
-                None,
-            )
+                Some(&mut overlapped),
+            ) {
+                Ok(()) => {}
+                Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
+                    let mut got = 0u32;
+                    GetOverlappedResult(*self.handle, &overlapped, &mut got, true).map_err(fail)?;
+                }
+                Err(e) => return Err(fail(e)),
+            }
         }
-        .map_err(|e| format!("volume length: {e}"))?;
         u64::try_from(info.Length).map_err(|_| "volume reports a negative length".into())
     }
 
@@ -309,6 +333,128 @@ pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
         mft_bytes: plan.mft_bytes,
         total_records: plan.total_records,
     })
+}
+
+/// A fixed set of in-flight overlapped volume reads (MFT speed round 2:
+/// QD>1 keeps the NVMe queue full; see BENCHMARKS.md 2026-07-11 for the
+/// matrix that picked the depth). Buffers move in at `submit` and come
+/// back only from `wait_any` once the kernel is done writing them; drop
+/// cancels and waits out stragglers so no buffer is ever freed under an
+/// active read.
+pub struct ReadRing<'v> {
+    volume: &'v Volume,
+    events: Vec<Owned<HANDLE>>,
+    ovs: Vec<OVERLAPPED>, // allocated once — stable addresses while in flight
+    slots: Vec<Option<(AlignedBuf, usize)>>,
+}
+
+impl<'v> ReadRing<'v> {
+    pub fn new(volume: &'v Volume, depth: usize) -> Result<ReadRing<'v>, String> {
+        assert!(
+            (1..=64).contains(&depth),
+            "depth bounded by WaitForMultipleObjects"
+        );
+        let mut events = Vec::with_capacity(depth);
+        for _ in 0..depth {
+            // SAFETY: fresh manual-reset event; Owned closes it on drop.
+            unsafe {
+                let e = CreateEventW(None, true, false, None)
+                    .map_err(|e| format!("create read event: {e}"))?;
+                events.push(Owned::new(e));
+            }
+        }
+        let mut ovs = vec![OVERLAPPED::default(); depth];
+        for (ov, event) in ovs.iter_mut().zip(&events) {
+            ov.hEvent = **event;
+        }
+        Ok(ReadRing {
+            volume,
+            events,
+            ovs,
+            slots: (0..depth).map(|_| None).collect(),
+        })
+    }
+
+    /// Starts a read of `len` bytes at `offset` into `buf`, which the ring
+    /// owns until [`Self::wait_any`] hands it back completed.
+    pub fn submit(
+        &mut self,
+        slot: usize,
+        offset: u64,
+        len: usize,
+        mut buf: AlignedBuf,
+    ) -> Result<(), String> {
+        assert!(self.slots[slot].is_none(), "slot already in flight");
+        assert!(len <= buf.as_mut_slice().len());
+        let ov = &mut self.ovs[slot];
+        ov.Anonymous.Anonymous.Offset = offset as u32;
+        ov.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
+        // SAFETY: event is reset before reuse; buffer and OVERLAPPED live in
+        // per-slot storage until the completion is consumed (or Drop waits).
+        unsafe {
+            ResetEvent(*self.events[slot]).map_err(|e| format!("reset read event: {e}"))?;
+            match ReadFile(
+                *self.volume.handle,
+                Some(&mut buf.as_mut_slice()[..len]),
+                None,
+                Some(ov),
+            ) {
+                Ok(()) => {} // completed synchronously; the event is set
+                Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {}
+                Err(e) => return Err(format!("read {len} bytes at {offset}: {e}")),
+            }
+        }
+        self.slots[slot] = Some((buf, len));
+        Ok(())
+    }
+
+    /// Blocks until any in-flight read completes; returns its slot and the
+    /// filled buffer. At least one read must be in flight.
+    pub fn wait_any(&mut self) -> Result<(usize, AlignedBuf), String> {
+        let busy: Vec<usize> = (0..self.slots.len())
+            .filter(|&i| self.slots[i].is_some())
+            .collect();
+        assert!(!busy.is_empty(), "wait_any with nothing in flight");
+        let handles: Vec<HANDLE> = busy.iter().map(|&i| *self.events[i]).collect();
+        // SAFETY: live event handles owned by self.
+        let wait = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
+        let idx = wait.0.wrapping_sub(WAIT_OBJECT_0.0) as usize;
+        if idx >= busy.len() {
+            return Err(format!("wait on volume reads failed: {wait:?}"));
+        }
+        let slot = busy[idx];
+        // The completion has signalled, so the kernel is done with the
+        // buffer either way — reclaim it before checking the result.
+        let (buf, want) = self.slots[slot].take().expect("busy slot holds a buffer");
+        let mut got = 0u32;
+        // SAFETY: this slot's op has completed; its OVERLAPPED is live.
+        unsafe { GetOverlappedResult(*self.volume.handle, &self.ovs[slot], &mut got, false) }
+            .map_err(|e| format!("volume read failed: {e}"))?;
+        if got as usize != want {
+            return Err(format!("short volume read: {got} of {want} bytes"));
+        }
+        Ok((slot, buf))
+    }
+}
+
+impl Drop for ReadRing<'_> {
+    fn drop(&mut self) {
+        if self.slots.iter().all(Option::is_none) {
+            return;
+        }
+        // SAFETY: cancelling this handle's IO, then waiting each in-flight
+        // slot's completion — after this no kernel write can touch the
+        // buffers we're about to free.
+        unsafe {
+            let _ = CancelIoEx(*self.volume.handle, None);
+            for (i, slot) in self.slots.iter().enumerate() {
+                if slot.is_some() {
+                    let mut got = 0u32;
+                    let _ = GetOverlappedResult(*self.volume.handle, &self.ovs[i], &mut got, true);
+                }
+            }
+        }
+    }
 }
 
 fn to_wide(s: &std::ffi::OsStr) -> Vec<u16> {

@@ -9,15 +9,20 @@ use crossbeam_channel::{Sender, bounded};
 use mathom_scanner::{ScanEvent, ScanHandle, ScanOptions, ScanProgress, ScanStats, Scanner};
 
 use crate::assemble::assemble;
+use crate::boot::ReadChunks;
 use crate::pipeline::Sweep;
-use crate::volume::{AlignedBuf, MftMap, Volume, is_ntfs, locate, map_mft};
+use crate::volume::{AlignedBuf, MftMap, ReadRing, Volume, is_ntfs, locate, map_mft};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
-/// Per read: a multiple of every record/cluster size, big enough to
-/// saturate NVMe sequential reads.
-const BUF_BYTES: usize = 16 * 1024 * 1024;
-/// Buffers in flight: one being read, one being parsed, two queued.
-const POOL: usize = 4;
+/// Per read. 4 MiB blocks at DEPTH 4 measured ~3.1 GB/s on the launch
+/// hardware vs 0.9 synchronous (BENCHMARKS.md 2026-07-11 matrix); deeper
+/// queues bought ~2% for double the memory.
+const BUF_BYTES: usize = 4 * 1024 * 1024;
+/// Overlapped reads in flight — the NVMe queue never drains to zero.
+const DEPTH: usize = 4;
+/// Total buffers: DEPTH in flight + slack so completions keep landing
+/// while the parser holds a few.
+const POOL: usize = DEPTH + 4;
 
 pub struct MftScanner;
 
@@ -176,11 +181,10 @@ enum ReaderMsg {
     Failed(String),
 }
 
-/// Streams the $MFT extent by extent in `BUF_BYTES` chunks. Every read
-/// offset/length is record- (and therefore sector-) aligned: `mft_bytes`
-/// rounds down to whole records, and a partial trailing record can't hold
-/// a live FILE record anyway. Offset math can't overflow — `map`'s extents
-/// are validated against the device size (`plan_mft_read`).
+/// Streams the $MFT with `DEPTH` overlapped reads in flight (chunk plan:
+/// `ReadChunks` — record-aligned, one extent per read, validated by
+/// `plan_mft_read`). Every early return relies on `ReadRing`'s Drop to
+/// cancel and wait out in-flight reads before their buffers are freed.
 fn read_mft(
     volume: Volume,
     map: &MftMap,
@@ -188,39 +192,55 @@ fn read_mft(
     empty_rx: crossbeam_channel::Receiver<AlignedBuf>,
     cancel: &AtomicBool,
 ) {
-    let cluster = map.geometry.cluster_size as u64;
-    let record = map.geometry.record_size as u64;
-    let mut remaining = map.total_records as u64 * record;
-    let mut next_record = 0usize;
+    let mut chunks = ReadChunks::new(
+        &map.extents,
+        map.geometry.cluster_size,
+        map.geometry.record_size,
+        map.total_records,
+        BUF_BYTES,
+    );
+    let mut ring = match ReadRing::new(&volume, DEPTH) {
+        Ok(ring) => ring,
+        Err(e) => {
+            let _ = full_tx.send(ReaderMsg::Failed(e));
+            return;
+        }
+    };
+    let mut meta = [(0usize, 0usize); DEPTH]; // (first_record, bytes) per slot
+    let mut free: Vec<usize> = (0..DEPTH).collect();
+    let mut in_flight = 0usize;
+    let mut next_chunk = chunks.next();
 
-    for extent in &map.extents {
-        let mut disk_off = extent.lcn * cluster;
-        let mut left_in_extent = extent.clusters * cluster;
-        while left_in_extent > 0 && remaining > 0 {
-            if cancel.load(Ordering::Relaxed) {
-                return;
-            }
-            let Ok(mut buf) = empty_rx.recv() else { return };
-            // All three are record-multiples (cluster % record == 0 is
-            // guaranteed by map_mft), so reads stay aligned end to end.
-            let want = (BUF_BYTES as u64).min(left_in_extent).min(remaining) as usize;
-            if let Err(e) = volume.read_at(disk_off, &mut buf.as_mut_slice()[..want]) {
+    while next_chunk.is_some() || in_flight > 0 {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        while let (Some(chunk), Some(&slot)) = (next_chunk, free.last()) {
+            let Ok(buf) = empty_rx.recv() else { return };
+            if let Err(e) = ring.submit(slot, chunk.disk_offset, chunk.bytes, buf) {
                 let _ = full_tx.send(ReaderMsg::Failed(e));
                 return;
             }
-            if full_tx
-                .send(ReaderMsg::Chunk(next_record, buf, want))
-                .is_err()
-            {
+            free.pop();
+            meta[slot] = (chunk.first_record, chunk.bytes);
+            in_flight += 1;
+            next_chunk = chunks.next();
+        }
+        let (slot, buf) = match ring.wait_any() {
+            Ok(done) => done,
+            Err(e) => {
+                let _ = full_tx.send(ReaderMsg::Failed(e));
                 return;
             }
-            next_record += want / record as usize;
-            disk_off += want as u64;
-            left_in_extent -= want as u64;
-            remaining = remaining.saturating_sub(want as u64);
-        }
-        if remaining == 0 {
-            break;
+        };
+        in_flight -= 1;
+        free.push(slot);
+        let (first_record, bytes) = meta[slot];
+        if full_tx
+            .send(ReaderMsg::Chunk(first_record, buf, bytes))
+            .is_err()
+        {
+            return;
         }
     }
 }
