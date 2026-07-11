@@ -4,6 +4,9 @@
 //! re-queries only the slices it can see, so payloads stay O(visible rows).
 //! Every query carries a scan `generation` so stale answers get dropped.
 //! Lock order: never hold the builder lock and progress lock together.
+//! Threading: commands that take the builder lock or touch the filesystem are
+//! `(async)` (worker thread) so the window's event loop never blocks; O(1)
+//! control commands stay sync and keep the main thread's serialization.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -189,7 +192,7 @@ pub fn scan_status(state: State<'_, AppState>) -> Snapshot {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_children(
     state: State<'_, AppState>,
     generation: u64,
@@ -218,7 +221,7 @@ pub fn get_children(
     Ok(listings)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_node(
     state: State<'_, AppState>,
     generation: u64,
@@ -237,7 +240,7 @@ pub fn get_node(
     Ok(Some(make_row(tree, id, parent_size)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Result<String, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -248,7 +251,7 @@ pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Resu
     Ok(tree.path(id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_treemap(
     state: State<'_, AppState>,
     generation: u64,
@@ -314,7 +317,7 @@ pub struct TypePanelData {
     top_files: Vec<Row>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_type_stats(
     state: State<'_, AppState>,
     generation: u64,
@@ -370,7 +373,7 @@ pub struct SearchResultsDto {
     total: u64,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search(
     state: State<'_, AppState>,
     generation: u64,
@@ -406,7 +409,7 @@ pub fn search(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_ancestors(
     state: State<'_, AppState>,
     generation: u64,
@@ -455,7 +458,7 @@ fn delete_block_reason(scan_state: ScanState, path: &str) -> Option<String> {
     crate::protected::deletion_block_reason(path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_preflight(
     state: State<'_, AppState>,
     generation: u64,
@@ -473,7 +476,7 @@ pub fn delete_preflight(
     Ok(DeletePreflight { path, block_reason })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_entry(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -534,7 +537,7 @@ pub fn delete_entry(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_in_explorer(
     state: State<'_, AppState>,
     generation: u64,
