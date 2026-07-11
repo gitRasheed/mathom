@@ -14,15 +14,17 @@ use crate::pipeline::Sweep;
 use crate::volume::{AlignedBuf, MftMap, ReadRing, Volume, is_ntfs, locate, map_mft};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
-/// Per read. 4 MiB blocks at DEPTH 4 measured ~3.1 GB/s on the launch
-/// hardware vs 0.9 synchronous (BENCHMARKS.md 2026-07-11 matrix); deeper
-/// queues bought ~2% for double the memory.
-const BUF_BYTES: usize = 4 * 1024 * 1024;
-/// Overlapped reads in flight — the NVMe queue never drains to zero.
+/// Per read. Big enough that one buffer feeds `Sweep::consume` a full
+/// complement of rayon tasks (16 at 1 KiB records / TASK_RECORDS=1024) —
+/// 4 MiB buffers measured parse-bound at 1.17 GB/s for exactly that
+/// reason (BENCHMARKS.md 2026-07-11).
+const BUF_BYTES: usize = 16 * 1024 * 1024;
+/// Overlapped reads in flight — ~3.1 GB/s at depth 4 on the probe matrix
+/// vs 0.9 synchronous; deeper bought ~2% for double the memory.
 const DEPTH: usize = 4;
 /// Total buffers: DEPTH in flight + slack so completions keep landing
-/// while the parser holds a few.
-const POOL: usize = DEPTH + 4;
+/// while the parser holds a couple.
+const POOL: usize = DEPTH + 2;
 
 pub struct MftScanner;
 
