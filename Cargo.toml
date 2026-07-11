@@ -13,9 +13,13 @@ edition = "2024"
 
 # Do NOT add panic = "abort": the scan workers' crash-safe Done contract
 # (mathom-scanner::spawn_scan_thread) depends on catch_unwind.
+# codegen-units 16, not 1: thin LTO already recovers cross-unit inlining,
+# and cu=1 serialized single-crate codegen — a one-file release rebuild
+# took 124s vs 60s (full builds 160s vs 146s, exe +0.1 MB; measured
+# 2026-07-11, BENCHMARKS.md, scan bench re-verified after the switch).
 [profile.release]
 lto = "thin"
-codegen-units = 1
+codegen-units = 16
 strip = true
 
 # `tauri dev` builds the app in dev profile; unoptimized scan code made a

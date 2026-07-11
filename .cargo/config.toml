@@ -1,0 +1,6 @@
+# rust-lld instead of link.exe: the dev loop's cost is linking the Tauri
+# app crate; lld cut the one-file-touch dev rebuild measurably (numbers in
+# BENCHMARKS.md, 2026-07-11). Applies to release links too — the scan
+# bench was re-verified after the switch.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
