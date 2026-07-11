@@ -27,6 +27,7 @@ windows = { version = "0.62.2", optional = true, features = [
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
     "Win32_System_Ioctl",
+    "Win32_System_Threading",
     "Win32_Security",
 ] }
 
@@ -47,4 +48,8 @@ required-features = ["mft-backend"]
 
 [[example]]
 name = "dump_mft"
+required-features = ["mft-backend"]
+
+[[example]]
+name = "read_probe"
 required-features = ["mft-backend"]
