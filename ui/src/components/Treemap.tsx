@@ -670,7 +670,11 @@ export function Treemap({
           <div className="absolute inset-0 flex items-center justify-center text-xs text-ink-5">
             {generation === 0
               ? "Treemap appears here during a scan"
-              : "Waiting for data…"}
+              : filter
+                ? "Nothing here matches the filter — Esc clears it"
+                : snapshot?.state === "scanning"
+                  ? "Waiting for data…"
+                  : "Nothing to show here"}
           </div>
         )}
         {tooltip && (
