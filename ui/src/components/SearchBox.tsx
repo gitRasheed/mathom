@@ -110,10 +110,14 @@ export function SearchBox({
 
   const choose = useCallback(
     (hit: SearchHit) => {
+      // A jump targets the real tree: when the box query isn't the applied
+      // filter, the hit may be hidden by it — drop the filter first. Same
+      // query = the hit is visible by construction, keep filtering.
+      if (activeFilter && text.trim() !== activeFilter) onApplyFilter(null);
       onSelect(hit);
       setOpen(false);
     },
-    [onSelect],
+    [onSelect, onApplyFilter, activeFilter, text],
   );
 
   const onKeyDown = (e: React.KeyboardEvent) => {

@@ -249,7 +249,11 @@ export function useScan(): ScanController {
   const toggleHideSystem = useCallback(() => setHideSystem((v) => !v), []);
 
   const setFilter = useCallback((query: string | null) => {
-    setFilterState(query && query.trim() !== "" ? query : null);
+    const next = query && query.trim() !== "" ? query : null;
+    // Eager ref update: a reveal fired in the same tick (jump-to after a
+    // filter clear) must fetch with the new filter, not the stale one.
+    filterRef.current = next;
+    setFilterState(next);
   }, []);
 
   const pathOf = useCallback(async (id: number) => {
