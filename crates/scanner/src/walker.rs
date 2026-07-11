@@ -31,6 +31,7 @@ struct Ctx {
     bytes: AtomicU64,
     errors: AtomicU64,
     batch_size: usize,
+    cluster: u64,
 }
 
 impl Ctx {
@@ -66,6 +67,7 @@ fn run_scan(options: ScanOptions, tx: Sender<ScanEvent>, cancel: Arc<AtomicBool>
         bytes: AtomicU64::new(0),
         errors: AtomicU64::new(0),
         batch_size: options.batch_size.max(1),
+        cluster: bytes_per_cluster(&options.root).unwrap_or(0),
     });
 
     let finish = |ctx: &Ctx| {
@@ -184,10 +186,11 @@ fn walk_dir<'a>(scope: &rayon::Scope<'a>, path: PathBuf, dir_id: u32, ctx: &Arc<
             size = meta.len();
             let attr_flags = allocation_flags(file_attributes(&meta));
             allocated = if attr_flags == EntryFlags(0) {
-                size
+                round_up_to_cluster(size, ctx.cluster)
             } else {
                 flags = flags.union(attr_flags);
-                allocated_on_disk(&dent.path()).unwrap_or(size)
+                allocated_on_disk(&dent.path())
+                    .unwrap_or_else(|| round_up_to_cluster(size, ctx.cluster))
             };
             files += 1;
             bytes += size;
@@ -315,6 +318,54 @@ fn allocation_flags(attrs: u32) -> EntryFlags {
         f.insert(EntryFlags::PLACEHOLDER);
     }
     f
+}
+
+/// Plain files occupy whole clusters; cluster 0 (unknown) leaves the size
+/// untouched. Tiny MFT-resident files get overcounted by one cluster — only
+/// the MFT backend can know residency.
+fn round_up_to_cluster(size: u64, cluster: u64) -> u64 {
+    if cluster == 0 {
+        size
+    } else {
+        size.div_ceil(cluster) * cluster
+    }
+}
+
+/// Cluster size of the volume containing `root`, via `GetDiskFreeSpaceW`.
+#[cfg(windows)]
+fn bytes_per_cluster(root: &std::path::Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Component;
+
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceW;
+    use windows::core::PCWSTR;
+
+    // The call wants the volume root ("C:\", "\\server\share\").
+    let Some(Component::Prefix(prefix)) = root.components().next() else {
+        return None;
+    };
+    let mut wide: Vec<u16> = prefix.as_os_str().encode_wide().collect();
+    wide.extend([u16::from(b'\\'), 0]);
+
+    let (mut spc, mut bps) = (0u32, 0u32);
+    // SAFETY: NUL-terminated root path and valid out-pointers for the call.
+    unsafe {
+        GetDiskFreeSpaceW(
+            PCWSTR(wide.as_ptr()),
+            Some(&mut spc),
+            Some(&mut bps),
+            None,
+            None,
+        )
+    }
+    .ok()?;
+    let cluster = u64::from(spc) * u64::from(bps);
+    (cluster != 0).then_some(cluster)
+}
+
+#[cfg(not(windows))]
+fn bytes_per_cluster(_root: &std::path::Path) -> Option<u64> {
+    None
 }
 
 /// True on-disk allocation via `GetCompressedFileSizeW` — a path-only query.

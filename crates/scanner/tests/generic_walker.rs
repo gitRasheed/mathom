@@ -206,6 +206,36 @@ fn junction_is_marked_and_not_descended() {
     assert_eq!(tree.node(Tree::ROOT).size, 1000);
 }
 
+/// Plain files occupy whole clusters on disk; the walker must report
+/// cluster-rounded allocation like the MFT backend does (Σ backed clusters),
+/// not the raw byte length. Caught by the WizTree parity harness 2026-07-11.
+#[cfg(windows)]
+#[test]
+fn plain_file_allocation_is_cluster_rounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("tiny.bin"), [0xCD; 1]).unwrap();
+
+    let (tree, _) = scan_to_tree(root);
+
+    let node = tree.node(child_by_name(&tree, Tree::ROOT, "tiny.bin"));
+    assert_eq!(node.size, 1);
+    // Every real cluster size is a multiple of 512, and a 1-byte file
+    // occupies exactly one cluster.
+    assert!(node.allocated >= 512, "not rounded up: {}", node.allocated);
+    assert_eq!(
+        node.allocated % 512,
+        0,
+        "not cluster-sized: {}",
+        node.allocated
+    );
+    assert!(
+        node.allocated <= 128 * 1024,
+        "implausible: {}",
+        node.allocated
+    );
+}
+
 /// Sparse files (and by the same attribute-driven path, compressed files
 /// and cloud placeholders) must report true on-disk allocation, not their
 /// logical size — a dehydrated OneDrive file is the worst case: huge
