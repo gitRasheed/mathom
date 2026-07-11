@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { SearchHit, Snapshot } from "../lib/api";
 import { formatBytes, formatElapsed, formatNumber } from "../lib/format";
 import type { AccentName, ThemePref } from "../lib/theme";
+import { ExportMenu } from "./ExportMenu";
 import { SearchBox } from "./SearchBox";
 import { SettingsMenu } from "./SettingsMenu";
 
@@ -10,6 +11,7 @@ interface ToolbarProps {
   scanning: boolean;
   snapshot: Snapshot | null;
   generation: number;
+  viewRootId: number;
   startError: string | null;
   hideSystem: boolean;
   typePanelOpen: boolean;
@@ -28,6 +30,7 @@ export function Toolbar({
   scanning,
   snapshot,
   generation,
+  viewRootId,
   startError,
   hideSystem,
   typePanelOpen,
@@ -147,6 +150,12 @@ export function Toolbar({
       >
         File types
       </button>
+      <ExportMenu
+        generation={generation}
+        viewRootId={viewRootId}
+        hideSystem={hideSystem}
+        disabled={scanning || generation === 0}
+      />
       <SettingsMenu
         themePref={themePref}
         accent={accent}

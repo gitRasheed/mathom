@@ -13,10 +13,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use mathom_core::export::ExportOptions;
 use mathom_core::tree::{NodeId, Tree};
 use mathom_core::{EntryFlags, TreeBuilder, TreemapOptions, Viewport, treemap};
 use mathom_scanner::{GenericScanner, ScanEvent, ScanHandle, ScanOptions, Scanner};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 const TICK_INTERVAL: Duration = Duration::from_millis(100);
@@ -535,6 +536,129 @@ pub fn delete_entry(
         parent_id,
         trashed: !permanent,
     })
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportArgs {
+    max_depth: Option<u32>,
+    dirs_only: bool,
+    hide_system: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportText {
+    rows: u64,
+    text: String,
+}
+
+/// Export holds the builder read lock for the whole write, which would
+/// stall the drain thread mid-scan — refused the same way deletes are.
+fn export_block_reason(scan_state: ScanState) -> Option<String> {
+    (scan_state == ScanState::Scanning)
+        .then(|| "can't export while a scan is running — wait for it to finish".into())
+}
+
+fn write_export(
+    tree: &Tree,
+    root_id: NodeId,
+    format: &str,
+    opts: &ExportOptions,
+    w: &mut impl std::io::Write,
+) -> Result<u64, String> {
+    match format {
+        "csv" => mathom_core::export::write_csv(tree, root_id, opts, w),
+        "json" => mathom_core::export::write_json(tree, root_id, opts, w),
+        _ => return Err(format!("unknown export format: {format}")),
+    }
+    .map_err(|e| e.to_string())
+}
+
+impl ExportArgs {
+    fn options(self) -> ExportOptions {
+        ExportOptions {
+            max_depth: self.max_depth,
+            dirs_only: self.dirs_only,
+            hide_system: self.hide_system,
+        }
+    }
+}
+
+#[tauri::command(async)]
+pub fn export_tree(
+    state: State<'_, AppState>,
+    generation: u64,
+    root_id: NodeId,
+    format: String,
+    dest: String,
+    args: ExportArgs,
+) -> Result<u64, String> {
+    use std::io::Write as _;
+
+    let session = session_for(&state, generation)?;
+    let scan_state = session.progress.lock().unwrap().state;
+    if let Some(reason) = export_block_reason(scan_state) {
+        return Err(reason);
+    }
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    if !tree.is_live(root_id) {
+        return Err("unknown node".into());
+    }
+    let file = std::fs::File::create(&dest).map_err(|e| format!("{dest}: {e}"))?;
+    let mut w = std::io::BufWriter::new(file);
+    let rows = write_export(tree, root_id, &format, &args.options(), &mut w)?;
+    w.flush().map_err(|e| format!("{dest}: {e}"))?;
+    Ok(rows)
+}
+
+/// Clipboard exports travel back over IPC as one string; past the cap the
+/// right answer is "save to a file", not a bigger message.
+const CLIPBOARD_CAP: usize = 16 * 1024 * 1024;
+const CLIPBOARD_CAP_MSG: &str =
+    "export is bigger than 16 MiB — save it to a file instead, or lower the depth";
+
+struct CappedBuf {
+    buf: Vec<u8>,
+}
+
+impl std::io::Write for CappedBuf {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.buf.len() + data.len() > CLIPBOARD_CAP {
+            return Err(std::io::Error::other(CLIPBOARD_CAP_MSG));
+        }
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tauri::command(async)]
+pub fn export_text(
+    state: State<'_, AppState>,
+    generation: u64,
+    root_id: NodeId,
+    format: String,
+    args: ExportArgs,
+) -> Result<ExportText, String> {
+    let session = session_for(&state, generation)?;
+    let scan_state = session.progress.lock().unwrap().state;
+    if let Some(reason) = export_block_reason(scan_state) {
+        return Err(reason);
+    }
+    let builder = session.builder.read().unwrap();
+    let tree = builder.tree();
+    if !tree.is_live(root_id) {
+        return Err("unknown node".into());
+    }
+    let mut w = CappedBuf { buf: Vec::new() };
+    let rows = write_export(tree, root_id, &format, &args.options(), &mut w)?;
+    let text = String::from_utf8(w.buf).map_err(|e| e.to_string())?;
+    Ok(ExportText { rows, text })
 }
 
 #[tauri::command(async)]

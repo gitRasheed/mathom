@@ -3,6 +3,7 @@
 
 pub mod category;
 pub mod entry;
+pub mod export;
 pub mod interner;
 pub mod search;
 pub mod stats;

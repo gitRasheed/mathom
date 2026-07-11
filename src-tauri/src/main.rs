@@ -22,6 +22,8 @@ fn main() {
             scan::search,
             scan::delete_preflight,
             scan::delete_entry,
+            scan::export_tree,
+            scan::export_text,
             scan::open_in_explorer,
             elevation::elevation_status,
             elevation::relaunch_elevated,

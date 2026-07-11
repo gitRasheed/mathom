@@ -300,6 +300,7 @@ export default function App() {
         scanning={scan.scanning}
         snapshot={scan.snapshot}
         generation={generation}
+        viewRootId={viewRootId}
         startError={scan.startError}
         hideSystem={scan.hideSystem}
         typePanelOpen={typePanelOpen}

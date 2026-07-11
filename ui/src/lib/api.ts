@@ -106,6 +106,19 @@ export interface ElevationStatus {
   devBuild: boolean;
 }
 
+export type ExportFormat = "csv" | "json";
+
+export interface ExportArgs {
+  maxDepth: number | null;
+  dirsOnly: boolean;
+  hideSystem: boolean;
+}
+
+export interface ExportText {
+  rows: number;
+  text: string;
+}
+
 export const api = {
   startScan: (path: string) => invoke<number>("start_scan", { path }),
   cancelScan: () => invoke<void>("cancel_scan"),
@@ -154,6 +167,20 @@ export const api = {
     invoke<DeleteResult>("delete_entry", { generation, id, permanent }),
   openInExplorer: (generation: number, id: number) =>
     invoke<void>("open_in_explorer", { generation, id }),
+  exportTree: (
+    generation: number,
+    rootId: number,
+    format: ExportFormat,
+    dest: string,
+    args: ExportArgs,
+  ) =>
+    invoke<number>("export_tree", { generation, rootId, format, dest, args }),
+  exportText: (
+    generation: number,
+    rootId: number,
+    format: ExportFormat,
+    args: ExportArgs,
+  ) => invoke<ExportText>("export_text", { generation, rootId, format, args }),
   elevationStatus: () => invoke<ElevationStatus>("elevation_status"),
   /** Resolves only on decline (as an error); on success the app exits. */
   relaunchElevated: () => invoke<void>("relaunch_elevated"),
