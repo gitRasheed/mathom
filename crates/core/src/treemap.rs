@@ -53,6 +53,29 @@ pub fn layout(
     viewport: Viewport,
     opts: &TreemapOptions,
 ) -> Vec<TreemapRect> {
+    layout_impl(tree, root, viewport, opts, None)
+}
+
+/// Layout under a view filter: per-node effective bytes (0 = omit), as
+/// built by `search::build_overlay`. hide_system is already baked into the
+/// overlay, so `opts.hide_system` is not consulted here.
+pub fn layout_with_filter(
+    tree: &Tree,
+    root: NodeId,
+    viewport: Viewport,
+    opts: &TreemapOptions,
+    bytes: &[u64],
+) -> Vec<TreemapRect> {
+    layout_impl(tree, root, viewport, opts, Some(bytes))
+}
+
+fn layout_impl(
+    tree: &Tree,
+    root: NodeId,
+    viewport: Viewport,
+    opts: &TreemapOptions,
+    filter: Option<&[u64]>,
+) -> Vec<TreemapRect> {
     let mut out = Vec::new();
     if tree.is_empty() || (root as usize) >= tree.len() || viewport.w <= 0.0 || viewport.h <= 0.0 {
         return out;
@@ -63,12 +86,18 @@ pub fn layout(
         w: viewport.w as f64,
         h: viewport.h as f64,
     };
-    let visible = opts.hide_system.then(|| {
-        let mut v = vec![0u64; tree.len()];
-        fill_visible(tree, root, &mut v);
-        v
-    });
-    emit(tree, root, frame, 0, opts, visible.as_deref(), &mut out);
+    let owned: Vec<u64>;
+    let visible: Option<&[u64]> = match filter {
+        Some(bytes) => Some(bytes),
+        None if opts.hide_system => {
+            let mut v = vec![0u64; tree.len()];
+            fill_visible(tree, root, &mut v);
+            owned = v;
+            Some(&owned)
+        }
+        None => None,
+    };
+    emit(tree, root, frame, 0, opts, visible, &mut out);
     out
 }
 
@@ -89,7 +118,9 @@ fn fill_visible(tree: &Tree, id: NodeId, visible: &mut [u64]) -> u64 {
 
 fn effective_size(tree: &Tree, id: NodeId, visible: Option<&[u64]>) -> u64 {
     match visible {
-        Some(v) => v[id as usize],
+        // Bounds-tolerant: a tree that grew past a filter's snapshot reads
+        // as size 0 here rather than panicking.
+        Some(v) => v.get(id as usize).copied().unwrap_or(0),
         None => tree.node(id).size,
     }
 }
@@ -534,6 +565,23 @@ mod tests {
             hide_system: true,
             ..no_padding()
         }
+    }
+
+    /// A filter's byte array drives both areas and omissions.
+    #[test]
+    fn external_filter_bytes_drive_areas_and_omissions() {
+        let tree = flat_tree(&[("a", 500), ("b", 300), ("c", 200)]);
+        let bytes = vec![600u64, 500, 0, 100]; // root, a, b(filtered out), c
+        let rects = layout_with_filter(
+            &tree,
+            0,
+            Viewport { w: 100.0, h: 100.0 },
+            &no_padding(),
+            &bytes,
+        );
+        assert!(rects.iter().all(|r| r.id != 2), "zero-byte node omitted");
+        assert!((area(&rect_of(&rects, 1)) - 10_000.0 * 5.0 / 6.0).abs() < 1.0);
+        assert!((area(&rect_of(&rects, 3)) - 10_000.0 / 6.0).abs() < 1.0);
     }
 
     #[test]

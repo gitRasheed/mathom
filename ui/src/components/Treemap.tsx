@@ -104,6 +104,8 @@ export interface TreemapProps {
   /** Bumped by useTheme after a theme/accent change to force a re-bake. */
   themeRev: number;
   hideSystem: boolean;
+  /** Active view filter (search grammar) or null. */
+  filter: string | null;
   selected: number | null;
   hoveredId: number | null;
   onSelect: (rect: TreemapRect) => void;
@@ -119,6 +121,7 @@ export function Treemap({
   revision,
   themeRev,
   hideSystem,
+  filter,
   selected,
   hoveredId,
   onSelect,
@@ -155,6 +158,8 @@ export function Treemap({
   hoveredIdRef.current = hoveredId;
   const hideSystemRef = useRef(hideSystem);
   hideSystemRef.current = hideSystem;
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
 
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -315,6 +320,7 @@ export function Treemap({
         w,
         h,
         hideSystemRef.current,
+        filterRef.current,
       );
       if (seq !== fetchSeqRef.current || forRoot !== rootIdRef.current) return;
       rectsRef.current = rects;
@@ -411,7 +417,7 @@ export function Treemap({
 
   useEffect(() => {
     void fetchLayout();
-  }, [hideSystem, fetchLayout]);
+  }, [hideSystem, filter, fetchLayout]);
 
   const prevStateRef = useRef<string | undefined>(undefined);
   useEffect(() => {

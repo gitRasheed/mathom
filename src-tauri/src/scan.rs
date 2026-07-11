@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use mathom_core::export::ExportOptions;
+use mathom_core::search::{FilterOverlay, SearchQuery};
 use mathom_core::tree::{NodeId, Tree};
 use mathom_core::{EntryFlags, TreeBuilder, TreemapOptions, Viewport, treemap};
 use mathom_scanner::{GenericScanner, ScanEvent, ScanHandle, ScanOptions, Scanner};
@@ -34,6 +35,50 @@ struct Session {
     builder: RwLock<TreeBuilder>,
     progress: Mutex<Progress>,
     handle: ScanHandle,
+    /// View-filter overlay cache, keyed by (query, hide_system). Cleared on
+    /// delete (ids shift); overlay reads are bounds-tolerant, so a tree that
+    /// grew past the snapshot degrades to "filtered out", never a panic.
+    /// Lock order: only ever taken while holding the builder lock.
+    filter: Mutex<Option<FilterCache>>,
+}
+
+struct FilterCache {
+    query: String,
+    hide_system: bool,
+    overlay: Arc<FilterOverlay>,
+}
+
+/// Overlay for `filter`, cached per session. `None` when the query is
+/// absent or parses to nothing — callers then serve the unfiltered view.
+fn overlay_for(
+    session: &Session,
+    tree: &Tree,
+    filter: Option<&str>,
+    hide_system: bool,
+) -> Option<Arc<FilterOverlay>> {
+    let text = filter?.trim();
+    let query = SearchQuery::parse(text);
+    if query.is_empty() {
+        return None;
+    }
+    let mut cache = session.filter.lock().unwrap();
+    if let Some(c) = cache.as_ref()
+        && c.query == text
+        && c.hide_system == hide_system
+    {
+        return Some(Arc::clone(&c.overlay));
+    }
+    let overlay = Arc::new(mathom_core::search::build_overlay(
+        tree,
+        &query,
+        hide_system,
+    ));
+    *cache = Some(FilterCache {
+        query: text.to_string(),
+        hide_system,
+        overlay: Arc::clone(&overlay),
+    });
+    Some(overlay)
 }
 
 #[derive(Default)]
@@ -143,6 +188,7 @@ pub fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String) -> R
             ..Progress::default()
         }),
         handle,
+        filter: Mutex::new(None),
     });
 
     {
@@ -201,21 +247,44 @@ pub fn get_children(
     sort_by: String,
     descending: bool,
     hide_system: bool,
+    filter: Option<String>,
 ) -> Result<Vec<DirListing>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
     let tree = builder.tree();
+    let overlay = overlay_for(&session, tree, filter.as_deref(), hide_system);
     let mut listings = Vec::with_capacity(ids.len());
     for id in ids {
         if !tree.is_live(id) || !tree.node(id).is_dir() {
             continue;
         }
-        let parent_size = tree.node(id).size;
-        let mut rows: Vec<Row> = tree
-            .children(id)
-            .filter(|&c| !hide_system || !tree.node(c).flags.contains(EntryFlags::SYSTEM))
-            .map(|c| make_row(tree, c, parent_size))
-            .collect();
+        // Filtered rows show matched bytes (the treemap already does), so
+        // both views answer the question the query asked.
+        let mut rows: Vec<Row> = match &overlay {
+            Some(o) => {
+                let parent_bytes = o.bytes_of(id);
+                tree.children(id)
+                    .filter(|&c| o.is_visible(c))
+                    .map(|c| {
+                        let mut row = make_row(tree, c, parent_bytes);
+                        row.size = o.bytes_of(c);
+                        row.pct = if parent_bytes == 0 {
+                            0.0
+                        } else {
+                            row.size as f64 / parent_bytes as f64
+                        };
+                        row
+                    })
+                    .collect()
+            }
+            None => {
+                let parent_size = tree.node(id).size;
+                tree.children(id)
+                    .filter(|&c| !hide_system || !tree.node(c).flags.contains(EntryFlags::SYSTEM))
+                    .map(|c| make_row(tree, c, parent_size))
+                    .collect()
+            }
+        };
         sort_rows(&mut rows, &sort_by, descending);
         listings.push(DirListing { id, rows });
     }
@@ -260,6 +329,7 @@ pub fn get_treemap(
     width: f32,
     height: f32,
     hide_system: bool,
+    filter: Option<String>,
 ) -> Result<Vec<TreemapRectDto>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -276,15 +346,14 @@ pub fn get_treemap(
         max_depth: 24,
         hide_system,
     };
-    let rects = treemap::layout(
-        tree,
-        root_id,
-        Viewport {
-            w: width,
-            h: height,
-        },
-        &opts,
-    );
+    let viewport = Viewport {
+        w: width,
+        h: height,
+    };
+    let rects = match overlay_for(&session, tree, filter.as_deref(), hide_system) {
+        Some(o) => treemap::layout_with_filter(tree, root_id, viewport, &opts, &o.bytes),
+        None => treemap::layout(tree, root_id, viewport, &opts),
+    };
     Ok(rects
         .into_iter()
         .map(|r| TreemapRectDto {
@@ -324,6 +393,7 @@ pub fn get_type_stats(
     generation: u64,
     root_id: NodeId,
     hide_system: bool,
+    filter: Option<String>,
 ) -> Result<TypePanelData, String> {
     const TOP_FILES: usize = 8;
 
@@ -334,12 +404,15 @@ pub fn get_type_stats(
         return Err("unknown node".into());
     }
 
-    let bd = mathom_core::stats::type_breakdown(tree, root_id, hide_system);
+    let overlay = overlay_for(&session, tree, filter.as_deref(), hide_system);
+    let visible = overlay.as_deref().map(|o| o.visible.as_slice());
+    let bd = mathom_core::stats::type_breakdown(tree, root_id, hide_system, visible);
     let subtree_total = bd.total_bytes;
-    let top_files = mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system)
-        .into_iter()
-        .map(|id| make_row(tree, id, subtree_total))
-        .collect();
+    let top_files =
+        mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system, visible)
+            .into_iter()
+            .map(|id| make_row(tree, id, subtree_total))
+            .collect();
     Ok(TypePanelData {
         types: bd
             .types
@@ -519,6 +592,8 @@ pub fn delete_entry(
     }
 
     let removed = session.builder.write().unwrap().remove(id);
+    // The overlay's per-id arrays are stale after any tree mutation.
+    *session.filter.lock().unwrap() = None;
     if let Some(r) = removed {
         {
             let mut p = session.progress.lock().unwrap();

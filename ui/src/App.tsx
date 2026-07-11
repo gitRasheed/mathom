@@ -303,6 +303,7 @@ export default function App() {
         viewRootId={viewRootId}
         startError={scan.startError}
         hideSystem={scan.hideSystem}
+        filter={scan.filter}
         typePanelOpen={typePanelOpen}
         themePref={theme.pref}
         accent={theme.accent}
@@ -311,6 +312,7 @@ export default function App() {
         onToggleHideSystem={scan.toggleHideSystem}
         onToggleTypePanel={() => setTypePanelOpen((v) => !v)}
         onSearchSelect={handleSearchSelect}
+        onApplyFilter={scan.setFilter}
         onThemePref={theme.setPref}
         onAccent={theme.setAccent}
       />
@@ -364,6 +366,7 @@ export default function App() {
             revision={treeRevision}
             themeRev={theme.themeRev}
             hideSystem={scan.hideSystem}
+            filter={scan.filter}
             selected={selected}
             hoveredId={hoveredId}
             onSelect={handleTreemapSelect}
@@ -378,6 +381,7 @@ export default function App() {
               rootId={viewRootId}
               revision={treeRevision}
               hideSystem={scan.hideSystem}
+              filter={scan.filter}
               onSelectFile={handlePanelFileSelect}
             />
           )}

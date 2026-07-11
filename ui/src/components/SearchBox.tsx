@@ -7,10 +7,24 @@ import { formatBytes, formatNumber } from "../lib/format";
 
 const DEBOUNCE_MS = 150;
 
+// Rotating placeholder: the grammar teaches itself, no docs required.
+const HINTS = [
+  "Search names…",
+  "Try ext:mp4 — filter by type",
+  "Try >500mb — filter by size",
+  "Enter filters the whole view",
+];
+const HINT_MS = 4000;
+
 interface SearchBoxProps {
   generation: number;
   hideSystem: boolean;
+  /** The query currently filtering all views, or null. */
+  activeFilter: string | null;
+  /** Filtering needs a finished scan. */
+  canFilter: boolean;
   onSelect: (hit: SearchHit) => void;
+  onApplyFilter: (query: string | null) => void;
 }
 
 function parentDir(path: string): string {
@@ -21,15 +35,29 @@ function parentDir(path: string): string {
 export function SearchBox({
   generation,
   hideSystem,
+  activeFilter,
+  canFilter,
   onSelect,
+  onApplyFilter,
 }: SearchBoxProps) {
   const [text, setText] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // Plain Enter filters the view; Enter after ↑↓ opens the picked match.
+  const [navigated, setNavigated] = useState(false);
+  const [hint, setHint] = useState(0);
   const seqRef = useRef(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const t = window.setInterval(
+      () => setHint((h) => (h + 1) % HINTS.length),
+      HINT_MS,
+    );
+    return () => window.clearInterval(t);
+  }, []);
 
   useEffect(() => {
     const seq = ++seqRef.current;
@@ -45,6 +73,7 @@ export function SearchBox({
           if (seq !== seqRef.current) return;
           setResults(r);
           setActive(0);
+          setNavigated(false);
           setOpen(true);
         })
         .catch((e) => reportUnlessStale("searching", e));
@@ -91,23 +120,35 @@ export function SearchBox({
     if (e.key === "Escape") {
       if (open) {
         setOpen(false);
-      } else {
+      } else if (text !== "") {
         setText("");
+      } else if (activeFilter) {
+        onApplyFilter(null);
+      } else {
         inputRef.current?.blur();
       }
       return;
     }
     const hits = results?.hits ?? [];
-    if (!open || hits.length === 0) return;
-    if (e.key === "ArrowDown") {
+    if (e.key === "ArrowDown" && open && hits.length > 0) {
       e.preventDefault();
+      setNavigated(true);
       setActive((a) => Math.min(a + 1, hits.length - 1));
-    } else if (e.key === "ArrowUp") {
+    } else if (e.key === "ArrowUp" && open && hits.length > 0) {
       e.preventDefault();
+      setNavigated(true);
       setActive((a) => Math.max(a - 1, 0));
     } else if (e.key === "Enter") {
-      const hit = hits[active] ?? hits[0];
-      if (hit) choose(hit);
+      if (navigated && open && hits.length > 0) {
+        const hit = hits[active] ?? hits[0];
+        if (hit) choose(hit);
+      } else if (canFilter && text.trim() !== "") {
+        onApplyFilter(text.trim());
+        setOpen(false);
+      } else if (open && hits.length > 0) {
+        // Mid-scan there is no filtering; Enter opens the top match.
+        choose(hits[active] ?? hits[0]);
+      }
     }
   };
 
@@ -121,14 +162,27 @@ export function SearchBox({
           if (results && text.trim() !== "") setOpen(true);
         }}
         onKeyDown={onKeyDown}
-        placeholder="Search — ext:mp4 >1gb"
+        placeholder={HINTS[hint]}
         spellCheck={false}
         disabled={generation === 0}
         title={
-          "Space-separated filters, all must match:\nname substring · ext:mp4 · >100mb"
+          "Space-separated filters, all must match:\nname substring · ext:mp4 · >100mb" +
+          (canFilter ? "\nEnter filters every view; Esc clears" : "")
         }
-        className="h-8 w-56 rounded-md border border-edge bg-panel px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-5 focus:border-accent-edge disabled:opacity-40"
+        className={`h-8 w-56 rounded-md border bg-panel px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-5 focus:border-accent-edge disabled:opacity-40 ${
+          activeFilter ? "border-accent pr-7" : "border-edge"
+        }`}
       />
+      {activeFilter && (
+        <button
+          onClick={() => onApplyFilter(null)}
+          title={`Stop filtering by "${activeFilter}"`}
+          aria-label="Clear the view filter"
+          className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-accent-ink hover:bg-raised"
+        >
+          ✕
+        </button>
+      )}
       {open && results && (
         <div className="absolute top-9 right-0 z-50 w-[26rem] overflow-hidden rounded-md border border-edge-strong bg-panel shadow-xl">
           <div className="border-b border-edge px-3 py-1 text-[11px] text-ink-4">
@@ -166,6 +220,11 @@ export function SearchBox({
                   </span>
                 </button>
               ))}
+            </div>
+          )}
+          {canFilter && (
+            <div className="border-t border-edge px-3 py-1 text-[11px] text-ink-5">
+              ↵ filters every view&ensp;·&ensp;↑↓ then ↵ opens a match
             </div>
           )}
         </div>

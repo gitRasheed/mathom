@@ -14,6 +14,7 @@ interface ToolbarProps {
   viewRootId: number;
   startError: string | null;
   hideSystem: boolean;
+  filter: string | null;
   typePanelOpen: boolean;
   themePref: ThemePref;
   accent: AccentName;
@@ -22,6 +23,7 @@ interface ToolbarProps {
   onToggleHideSystem: () => void;
   onToggleTypePanel: () => void;
   onSearchSelect: (hit: SearchHit) => void;
+  onApplyFilter: (query: string | null) => void;
   onThemePref: (pref: ThemePref) => void;
   onAccent: (accent: AccentName) => void;
 }
@@ -33,6 +35,7 @@ export function Toolbar({
   viewRootId,
   startError,
   hideSystem,
+  filter,
   typePanelOpen,
   themePref,
   accent,
@@ -41,6 +44,7 @@ export function Toolbar({
   onToggleHideSystem,
   onToggleTypePanel,
   onSearchSelect,
+  onApplyFilter,
   onThemePref,
   onAccent,
 }: ToolbarProps) {
@@ -136,7 +140,10 @@ export function Toolbar({
         <SearchBox
           generation={generation}
           hideSystem={hideSystem}
+          activeFilter={filter}
+          canFilter={!scanning && generation > 0}
           onSelect={onSearchSelect}
+          onApplyFilter={onApplyFilter}
         />
       </div>
       <button

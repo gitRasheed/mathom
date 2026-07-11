@@ -26,6 +26,8 @@ export interface ScanController {
   expanded: ReadonlySet<number>;
   sort: Sort;
   hideSystem: boolean;
+  /** Active view filter (search grammar) or null; applies post-scan only. */
+  filter: string | null;
   startError: string | null;
   scanning: boolean;
   start: (path: string) => Promise<void>;
@@ -35,6 +37,7 @@ export interface ScanController {
   expandMany: (ids: number[]) => void;
   changeSort: (key: SortKey) => void;
   toggleHideSystem: () => void;
+  setFilter: (query: string | null) => void;
   pathOf: (id: number) => Promise<string | null>;
 }
 
@@ -46,6 +49,7 @@ export function useScan(): ScanController {
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
   const [sort, setSort] = useState<Sort>({ key: "size", desc: true });
   const [hideSystem, setHideSystem] = useState(false);
+  const [filter, setFilterState] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
   const genRef = useRef(0);
@@ -55,6 +59,8 @@ export function useScan(): ScanController {
   sortRef.current = sort;
   const hideSystemRef = useRef(hideSystem);
   hideSystemRef.current = hideSystem;
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
   const busyRef = useRef(false);
   const queuedRef = useRef(false);
 
@@ -81,7 +87,14 @@ export function useScan(): ScanController {
       const ids = Array.from(new Set([0, ...expandedRef.current]));
       const [root, listings] = await Promise.all([
         api.getNode(gen, 0),
-        api.getChildren(gen, ids, s.key, s.desc, hideSystemRef.current),
+        api.getChildren(
+          gen,
+          ids,
+          s.key,
+          s.desc,
+          hideSystemRef.current,
+          filterRef.current,
+        ),
       ]);
       if (genRef.current === gen) {
         setRootRow(root);
@@ -136,7 +149,7 @@ export function useScan(): ScanController {
 
   useEffect(() => {
     void refresh();
-  }, [sort, hideSystem, refresh]);
+  }, [sort, hideSystem, filter, refresh]);
 
   const start = useCallback(
     async (path: string) => {
@@ -148,6 +161,7 @@ export function useScan(): ScanController {
         setRootRow(null);
         setChildrenMap(new Map());
         setExpanded(new Set([0]));
+        setFilterState(null); // a new scan starts unfiltered
         // Tiny scans can finish before the listener sees this generation.
         const s = await api.scanStatus();
         if (s.generation === gen) setSnapshot(s);
@@ -176,7 +190,14 @@ export function useScan(): ScanController {
       if (nowExpanded && gen !== 0) {
         const s = sortRef.current;
         api
-          .getChildren(gen, [id], s.key, s.desc, hideSystemRef.current)
+          .getChildren(
+            gen,
+            [id],
+            s.key,
+            s.desc,
+            hideSystemRef.current,
+            filterRef.current,
+          )
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
@@ -200,7 +221,14 @@ export function useScan(): ScanController {
       if (gen !== 0) {
         const s = sortRef.current;
         api
-          .getChildren(gen, fresh, s.key, s.desc, hideSystemRef.current)
+          .getChildren(
+            gen,
+            fresh,
+            s.key,
+            s.desc,
+            hideSystemRef.current,
+            filterRef.current,
+          )
           .then((listings) => {
             if (genRef.current === gen) mergeListings(listings);
           })
@@ -219,6 +247,10 @@ export function useScan(): ScanController {
   }, []);
 
   const toggleHideSystem = useCallback(() => setHideSystem((v) => !v), []);
+
+  const setFilter = useCallback((query: string | null) => {
+    setFilterState(query && query.trim() !== "" ? query : null);
+  }, []);
 
   const pathOf = useCallback(async (id: number) => {
     const gen = genRef.current;
@@ -239,6 +271,7 @@ export function useScan(): ScanController {
     expanded,
     sort,
     hideSystem,
+    filter,
     startError,
     scanning: snapshot?.state === "scanning",
     start,
@@ -247,6 +280,7 @@ export function useScan(): ScanController {
     expandMany,
     changeSort,
     toggleHideSystem,
+    setFilter,
     pathOf,
   };
 }

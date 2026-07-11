@@ -77,6 +77,72 @@ pub fn search(tree: &Tree, query: &SearchQuery, cap: usize, hide_system: bool) -
     }
 }
 
+/// Per-node view-filter overlay: the tree view, treemap, and type panel
+/// read it the way they read hide_system. A match is inherited downward —
+/// a matching directory includes its whole subtree.
+pub struct FilterOverlay {
+    /// Node matches, inherits a match, or contains one.
+    pub visible: Vec<bool>,
+    /// Matching file bytes under each node.
+    pub bytes: Vec<u64>,
+}
+
+impl FilterOverlay {
+    /// Bounds-tolerant: ids past the built length (a tree that grew after
+    /// the overlay snapshot) read as filtered-out, never a panic.
+    pub fn is_visible(&self, id: NodeId) -> bool {
+        self.visible.get(id as usize).copied().unwrap_or(false)
+    }
+
+    pub fn bytes_of(&self, id: NodeId) -> u64 {
+        self.bytes.get(id as usize).copied().unwrap_or(0)
+    }
+}
+
+/// One O(N) pass. hide_system composes: system subtrees neither match nor
+/// contribute bytes, even inside a matching directory.
+pub fn build_overlay(tree: &Tree, query: &SearchQuery, hide_system: bool) -> FilterOverlay {
+    let mut visible = vec![false; tree.len()];
+    let mut bytes = vec![0u64; tree.len()];
+    if tree.is_empty() || query.is_empty() {
+        return FilterOverlay { visible, bytes };
+    }
+    // (id, inherited, exiting): dirs get an exit marker so their subtree
+    // totals fold into the parent post-order; files fold immediately.
+    let mut stack: Vec<(NodeId, bool, bool)> = vec![(Tree::ROOT, false, false)];
+    while let Some((id, inherited, exiting)) = stack.pop() {
+        let node = tree.node(id);
+        if exiting {
+            if let Some(p) = node.parent() {
+                bytes[p as usize] += bytes[id as usize];
+                if visible[id as usize] {
+                    visible[p as usize] = true;
+                }
+            }
+            continue;
+        }
+        if hide_system && id != Tree::ROOT && node.flags.contains(EntryFlags::SYSTEM) {
+            continue;
+        }
+        let matched = inherited || (id != Tree::ROOT && matches(tree, id, query));
+        if node.is_dir() {
+            visible[id as usize] = matched;
+            stack.push((id, matched, true));
+            for c in tree.children(id) {
+                stack.push((c, matched, false));
+            }
+        } else if matched {
+            visible[id as usize] = true;
+            bytes[id as usize] = node.size;
+            if let Some(p) = node.parent() {
+                bytes[p as usize] += node.size;
+                visible[p as usize] = true;
+            }
+        }
+    }
+    FilterOverlay { visible, bytes }
+}
+
 fn matches(tree: &Tree, id: NodeId, q: &SearchQuery) -> bool {
     let node = tree.node(id);
     if node.size < q.min_size {
@@ -265,5 +331,55 @@ mod tests {
         let tree = sample();
         let r = search(&tree, &SearchQuery::parse("report ext:pdf >60"), 10, false);
         assert_eq!(r.ids, [2]);
+    }
+
+    #[test]
+    fn overlay_marks_matches_their_ancestors_and_bytes() {
+        let tree = sample();
+        let o = build_overlay(&tree, &SearchQuery::parse("ext:pdf"), false);
+        // report.pdf(2)=100 is the only match; archive.pdf(10) is a dir.
+        let visible: Vec<u32> = (0..tree.len() as u32)
+            .filter(|&i| o.is_visible(i))
+            .collect();
+        assert_eq!(visible, [0, 1, 2], "match + ancestors only");
+        assert_eq!(o.bytes_of(0), 100);
+        assert_eq!(o.bytes_of(1), 100);
+        assert_eq!(o.bytes_of(2), 100);
+        assert_eq!(o.bytes_of(10), 0);
+    }
+
+    /// A matching directory includes its whole subtree at full size.
+    #[test]
+    fn overlay_dir_match_is_inherited_by_the_subtree() {
+        let tree = sample();
+        let o = build_overlay(&tree, &SearchQuery::parse("media"), false);
+        assert!(o.is_visible(5) && o.is_visible(6) && o.is_visible(7));
+        assert!(!o.is_visible(1) && !o.is_visible(8));
+        assert_eq!(o.bytes_of(5), 700);
+        assert_eq!(o.bytes_of(6), 500);
+        assert_eq!(o.bytes_of(7), 200);
+        assert_eq!(o.bytes_of(0), 700);
+    }
+
+    /// hide_system wins over a match: the system subtree contributes
+    /// nothing even though pagefile.sys(999) satisfies `>400`.
+    #[test]
+    fn overlay_composes_hide_system() {
+        let tree = sample();
+        let o = build_overlay(&tree, &SearchQuery::parse(">400"), true);
+        assert!(!o.is_visible(8) && !o.is_visible(9));
+        assert_eq!(o.bytes_of(8), 0);
+        // media(700) matches as a dir and pulls in both files.
+        assert_eq!(o.bytes_of(5), 700);
+        assert_eq!(o.bytes_of(0), 700);
+    }
+
+    /// Ids past the overlay's snapshot read as filtered-out, not a panic.
+    #[test]
+    fn overlay_reads_are_bounds_tolerant() {
+        let tree = sample();
+        let o = build_overlay(&tree, &SearchQuery::parse("media"), false);
+        assert!(!o.is_visible(9999));
+        assert_eq!(o.bytes_of(9999), 0);
     }
 }

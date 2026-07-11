@@ -24,6 +24,8 @@ export interface TypePanelProps {
   /** Bumped by App after a delete so the numbers refresh. */
   revision: number;
   hideSystem: boolean;
+  /** Active view filter (search grammar) or null. */
+  filter: string | null;
   onSelectFile: (row: Row) => void;
 }
 
@@ -33,6 +35,7 @@ export function TypePanel({
   rootId,
   revision,
   hideSystem,
+  filter,
   onSelectFile,
 }: TypePanelProps) {
   const [data, setData] = useState<TypePanelData | null>(null);
@@ -44,7 +47,7 @@ export function TypePanel({
     const seq = ++seqRef.current;
     lastFetchRef.current = performance.now();
     api
-      .getTypeStats(generation, rootId, hideSystem)
+      .getTypeStats(generation, rootId, hideSystem, filter)
       .then((d) => {
         if (seq === seqRef.current) setData(d);
       })
@@ -54,7 +57,7 @@ export function TypePanel({
           reportUnlessStale("loading file types", e);
         }
       });
-  }, [generation, rootId, hideSystem]);
+  }, [generation, rootId, hideSystem, filter]);
 
   useEffect(() => {
     setData(null);

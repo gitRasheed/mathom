@@ -23,9 +23,16 @@ pub struct TypeBreakdown {
     pub total_files: u64,
 }
 
-pub fn type_breakdown(tree: &Tree, root: NodeId, hide_system: bool) -> TypeBreakdown {
+/// `filter`: a view filter's visibility flags (`search::build_overlay`);
+/// only visible files are counted.
+pub fn type_breakdown(
+    tree: &Tree,
+    root: NodeId,
+    hide_system: bool,
+    filter: Option<&[bool]>,
+) -> TypeBreakdown {
     let mut groups: HashMap<Option<ExtKey>, (u64, u64)> = HashMap::new();
-    for_each_file(tree, root, hide_system, |id, size| {
+    for_each_file(tree, root, hide_system, filter, |id, size| {
         let g = groups.entry(extension_key(tree.name(id))).or_default();
         g.0 += size;
         g.1 += 1;
@@ -58,12 +65,18 @@ pub fn type_breakdown(tree: &Tree, root: NodeId, hide_system: bool) -> TypeBreak
     }
 }
 
-pub fn largest_files(tree: &Tree, root: NodeId, n: usize, hide_system: bool) -> Vec<NodeId> {
+pub fn largest_files(
+    tree: &Tree,
+    root: NodeId,
+    n: usize,
+    hide_system: bool,
+    filter: Option<&[bool]>,
+) -> Vec<NodeId> {
     if n == 0 {
         return Vec::new();
     }
     let mut heap: BinaryHeap<Reverse<(u64, NodeId)>> = BinaryHeap::with_capacity(n + 1);
-    for_each_file(tree, root, hide_system, |id, size| {
+    for_each_file(tree, root, hide_system, filter, |id, size| {
         heap.push(Reverse((size, id)));
         if heap.len() > n {
             heap.pop();
@@ -78,7 +91,13 @@ fn ext_str(t: &TypeStat) -> &str {
     t.ext.as_ref().map_or("", |k| k.as_str())
 }
 
-fn for_each_file(tree: &Tree, root: NodeId, hide_system: bool, mut f: impl FnMut(NodeId, u64)) {
+fn for_each_file(
+    tree: &Tree,
+    root: NodeId,
+    hide_system: bool,
+    filter: Option<&[bool]>,
+    mut f: impl FnMut(NodeId, u64),
+) {
     if (root as usize) >= tree.len() {
         return; // ids come from the IPC boundary; unknown roots yield nothing
     }
@@ -86,6 +105,13 @@ fn for_each_file(tree: &Tree, root: NodeId, hide_system: bool, mut f: impl FnMut
     while let Some(id) = stack.pop() {
         let node = tree.node(id);
         if hide_system && id != root && node.flags.contains(EntryFlags::SYSTEM) {
+            continue;
+        }
+        // An invisible dir contains no visible files — prune the subtree.
+        // Bounds-tolerant like the other overlay reads.
+        if let Some(vis) = filter
+            && !vis.get(id as usize).copied().unwrap_or(false)
+        {
             continue;
         }
         if node.is_dir() {
@@ -151,7 +177,7 @@ mod tests {
     #[test]
     fn breakdown_groups_by_lowercased_extension_sorted_by_bytes() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, false);
+        let bd = type_breakdown(&tree, 0, false, None);
         let got: Vec<(&str, u64, u64)> = bd
             .types
             .iter()
@@ -174,7 +200,7 @@ mod tests {
     #[test]
     fn every_extension_is_listed_and_sums_reconcile_with_totals() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, false);
+        let bd = type_breakdown(&tree, 0, false, None);
         assert_eq!(bd.types.len(), 5); // sys, mkv, pdf, bin, no-extension
         assert_eq!(
             bd.types.iter().map(|t| t.bytes).sum::<u64>(),
@@ -189,7 +215,7 @@ mod tests {
     #[test]
     fn breakdown_categories_match_the_treemap_palette() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, false);
+        let bd = type_breakdown(&tree, 0, false, None);
         let cat = |ext: &str| bd.types.iter().find(|t| ext_of(t) == ext).unwrap().category;
         assert_eq!(cat("mkv"), Category::Video);
         assert_eq!(cat("pdf"), Category::Document);
@@ -200,7 +226,7 @@ mod tests {
     #[test]
     fn breakdown_is_scoped_to_the_subtree() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 1, false); // docs only
+        let bd = type_breakdown(&tree, 1, false, None); // docs only
         let got: Vec<(&str, u64)> = bd.types.iter().map(|t| (ext_of(t), t.bytes)).collect();
         assert_eq!(got, [("pdf", 150), ("", 8)]);
         assert_eq!(bd.total_bytes, 158);
@@ -209,7 +235,7 @@ mod tests {
     #[test]
     fn hide_system_prunes_system_subtrees() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 0, true);
+        let bd = type_breakdown(&tree, 0, true, None);
         assert!(bd.types.iter().all(|t| ext_of(t) != "sys"));
         assert_eq!(bd.total_bytes, 688); // 1687 - pagefile.sys(999)
         assert_eq!(bd.total_files, 5);
@@ -218,18 +244,42 @@ mod tests {
     #[test]
     fn largest_files_are_size_descending_and_scoped() {
         let tree = sample();
-        assert_eq!(largest_files(&tree, 0, 3, false), [8, 6, 2]);
-        assert_eq!(largest_files(&tree, 0, 3, true), [6, 2, 3]);
-        assert_eq!(largest_files(&tree, 1, 2, false), [2, 3]);
-        assert_eq!(largest_files(&tree, 0, 0, false), [] as [NodeId; 0]);
+        assert_eq!(largest_files(&tree, 0, 3, false, None), [8, 6, 2]);
+        assert_eq!(largest_files(&tree, 0, 3, true, None), [6, 2, 3]);
+        assert_eq!(largest_files(&tree, 1, 2, false, None), [2, 3]);
+        assert_eq!(largest_files(&tree, 0, 0, false, None), [] as [NodeId; 0]);
     }
 
     #[test]
     fn unknown_root_yields_empty_results() {
         let tree = sample();
-        let bd = type_breakdown(&tree, 999, false);
+        let bd = type_breakdown(&tree, 999, false, None);
         assert!(bd.types.is_empty());
         assert_eq!(bd.total_files, 0);
-        assert_eq!(largest_files(&tree, 999, 5, false), [] as [NodeId; 0]);
+        assert_eq!(largest_files(&tree, 999, 5, false, None), [] as [NodeId; 0]);
+    }
+
+    /// A view filter narrows both the breakdown and the largest-files list
+    /// to visible files only.
+    #[test]
+    fn view_filter_narrows_stats_to_visible_files() {
+        let tree = sample();
+        let overlay = crate::search::build_overlay(
+            &tree,
+            &crate::search::SearchQuery::parse("ext:pdf"),
+            false,
+        );
+        let bd = type_breakdown(&tree, 0, false, Some(&overlay.visible));
+        let got: Vec<(&str, u64, u64)> = bd
+            .types
+            .iter()
+            .map(|t| (ext_of(t), t.bytes, t.files))
+            .collect();
+        assert_eq!(got, [("pdf", 150, 2)]);
+        assert_eq!(bd.total_bytes, 150);
+        assert_eq!(
+            largest_files(&tree, 0, 5, false, Some(&overlay.visible)),
+            [2, 3]
+        );
     }
 }

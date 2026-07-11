@@ -129,6 +129,7 @@ export const api = {
     sortBy: SortKey,
     descending: boolean,
     hideSystem: boolean,
+    filter: string | null,
   ) =>
     invoke<DirListing[]>("get_children", {
       generation,
@@ -136,6 +137,7 @@ export const api = {
       sortBy,
       descending,
       hideSystem,
+      filter,
     }),
   getNode: (generation: number, id: number) =>
     invoke<Row | null>("get_node", { generation, id }),
@@ -147,6 +149,7 @@ export const api = {
     width: number,
     height: number,
     hideSystem: boolean,
+    filter: string | null,
   ) =>
     invoke<TreemapRect[]>("get_treemap", {
       generation,
@@ -154,9 +157,20 @@ export const api = {
       width,
       height,
       hideSystem,
+      filter,
     }),
-  getTypeStats: (generation: number, rootId: number, hideSystem: boolean) =>
-    invoke<TypePanelData>("get_type_stats", { generation, rootId, hideSystem }),
+  getTypeStats: (
+    generation: number,
+    rootId: number,
+    hideSystem: boolean,
+    filter: string | null,
+  ) =>
+    invoke<TypePanelData>("get_type_stats", {
+      generation,
+      rootId,
+      hideSystem,
+      filter,
+    }),
   getAncestors: (generation: number, id: number) =>
     invoke<Crumb[]>("get_ancestors", { generation, id }),
   search: (generation: number, query: string, hideSystem: boolean) =>
