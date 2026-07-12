@@ -33,11 +33,39 @@ export function ConfirmDelete({
   // Confirm stays disabled until the preflight lands: it carries the path
   // shown to the user and whether policy blocks this delete outright.
   const [preflight, setPreflight] = useState<DeletePreflight | null>(null);
+  const checkboxRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     cancelRef.current?.focus();
   }, []);
+
+  // Arrows cycle the enabled controls; Enter/Space then act natively on
+  // whichever is focused. Escape (below) and Tab stay untouched.
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
+    const backward = e.key === "ArrowLeft" || e.key === "ArrowUp";
+    if (!forward && !backward) return;
+    e.preventDefault();
+    const controls = [
+      checkboxRef.current,
+      cancelRef.current,
+      confirmRef.current,
+    ].filter(
+      (el): el is HTMLInputElement | HTMLButtonElement =>
+        el !== null && !el.disabled,
+    );
+    if (controls.length === 0) return;
+    const i = controls.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      i < 0
+        ? controls[forward ? 0 : controls.length - 1]
+        : controls[
+            (i + (forward ? 1 : -1) + controls.length) % controls.length
+          ];
+    next.focus();
+  };
 
   useEffect(() => {
     let live = true;
@@ -73,6 +101,7 @@ export function ConfirmDelete({
       <div
         className="w-[420px] max-w-[92vw] rounded-lg border border-edge-strong bg-panel p-5 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <h2 className="text-sm font-semibold text-ink">Delete this {kind}?</h2>
 
@@ -97,6 +126,7 @@ export function ConfirmDelete({
 
         <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-ink-3">
           <input
+            ref={checkboxRef}
             type="checkbox"
             className="accent-danger"
             checked={permanent}
@@ -127,6 +157,7 @@ export function ConfirmDelete({
             Cancel
           </button>
           <button
+            ref={confirmRef}
             className={`rounded-md px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-60 ${
               permanent
                 ? "bg-danger hover:bg-danger-hover"
