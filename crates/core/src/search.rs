@@ -11,18 +11,23 @@ use crate::tree::{NodeId, Tree};
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchQuery {
     pub name_terms: Vec<String>,
-    /// Lowercased extension without the dot.
-    pub ext: Option<String>,
+    /// Lowercased extensions without the dot; a file matching ANY passes
+    /// (`ext:mp4,mkv`). Empty = no extension constraint.
+    pub exts: Vec<String>,
     pub min_size: u64,
 }
 
 impl SearchQuery {
-    /// Tokens: name terms, `ext:pdf`, and `>100mb`/`>=1.5gb` size filters.
+    /// Tokens: name terms, `ext:pdf` / `ext:mp4,mkv`, and `>100mb` sizes.
     pub fn parse(text: &str) -> SearchQuery {
         let mut q = SearchQuery::default();
         for token in text.split_whitespace() {
-            if let Some(ext) = token.strip_prefix("ext:") {
-                q.ext = Some(ext.trim_start_matches('.').to_lowercase());
+            if let Some(exts) = token.strip_prefix("ext:") {
+                q.exts = exts
+                    .split(',')
+                    .map(|e| e.trim_start_matches('.').to_lowercase())
+                    .filter(|e| !e.is_empty())
+                    .collect();
             } else if let Some(bytes) = parse_min_size(token) {
                 q.min_size = bytes;
             } else {
@@ -33,7 +38,7 @@ impl SearchQuery {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.name_terms.is_empty() && self.ext.is_none() && self.min_size == 0
+        self.name_terms.is_empty() && self.exts.is_empty() && self.min_size == 0
     }
 }
 
@@ -148,12 +153,12 @@ fn matches(tree: &Tree, id: NodeId, q: &SearchQuery) -> bool {
     if node.size < q.min_size {
         return false;
     }
-    if let Some(ext) = &q.ext {
+    if !q.exts.is_empty() {
         if node.is_dir() {
             return false;
         }
         match extension_key(tree.name(id)) {
-            Some(key) if key.as_str() == ext => {}
+            Some(key) if q.exts.iter().any(|e| key.as_str() == e) => {}
             _ => return false,
         }
     }
@@ -250,8 +255,10 @@ mod tests {
     #[test]
     fn parse_splits_terms_ext_and_min_size() {
         let q = SearchQuery::parse("Report ext:.PDF >100mb");
+        assert_eq!(q.exts, vec!["pdf"]);
+        let multi = SearchQuery::parse("ext:mp4,.MKV,");
+        assert_eq!(multi.exts, vec!["mp4", "mkv"]);
         assert_eq!(q.name_terms, ["report"]);
-        assert_eq!(q.ext.as_deref(), Some("pdf"));
         assert_eq!(q.min_size, 100 * 1024 * 1024);
     }
 

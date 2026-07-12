@@ -27,6 +27,10 @@ export interface TypePanelProps {
   /** Active view filter (search grammar) or null. */
   filter: string | null;
   onSelectFile: (row: Row) => void;
+  /** Extensions in the active `ext:` filter — their rows get a tint. */
+  activeExts: string[];
+  /** Click = filter to this type; shift-click (additive) = add/remove it. */
+  onFilterType: (ext: string, additive: boolean) => void;
 }
 
 export function TypePanel({
@@ -37,6 +41,8 @@ export function TypePanel({
   hideSystem,
   filter,
   onSelectFile,
+  activeExts,
+  onFilterType,
 }: TypePanelProps) {
   const [data, setData] = useState<TypePanelData | null>(null);
   const seqRef = useRef(0);
@@ -102,7 +108,12 @@ export function TypePanel({
             rowComponent={TypeRow}
             rowCount={data.types.length}
             rowHeight={TYPE_ROW_HEIGHT}
-            rowProps={{ types: data.types, totalBytes: data.totalBytes }}
+            rowProps={{
+              types: data.types,
+              totalBytes: data.totalBytes,
+              activeExts,
+              onFilterType,
+            }}
             className="h-full"
           />
         )}
@@ -136,6 +147,8 @@ export function TypePanel({
 interface TypeRowsProps {
   types: TypeStat[];
   totalBytes: number;
+  activeExts: string[];
+  onFilterType: (ext: string, additive: boolean) => void;
 }
 
 function TypeRow({
@@ -143,10 +156,24 @@ function TypeRow({
   style,
   types,
   totalBytes,
+  activeExts,
+  onFilterType,
 }: RowComponentProps<TypeRowsProps>) {
   const t = types[index];
+  // "(no extension)" can't be expressed in the search grammar — not clickable.
+  const clickable = t.ext !== "";
+  const active = activeExts.includes(t.ext);
   return (
-    <div style={style} className="flex items-center gap-2 px-3 text-xs">
+    <div
+      style={style}
+      className={`flex items-center gap-2 px-3 text-xs ${
+        active ? "bg-accent-soft/25" : clickable ? "hover:bg-hush" : ""
+      }`}
+      title={clickable ? "Click filters to this type · shift-click adds" : ""}
+      onClick={(e) => {
+        if (clickable) onFilterType(t.ext, e.shiftKey);
+      }}
+    >
       <span
         className="h-2 w-2 shrink-0 rounded-[3px]"
         style={{ background: PALETTE[t.category] ?? PALETTE[10] }}

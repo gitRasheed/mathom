@@ -51,6 +51,14 @@ export function SearchBox({
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Filters can be set from outside (type-panel clicks) — the box adopts
+  // the query text so it never lies. Never stomp text mid-typing.
+  useEffect(() => {
+    if (activeFilter === null) return;
+    if (document.activeElement === inputRef.current) return;
+    setText(activeFilter);
+  }, [activeFilter]);
+
   useEffect(() => {
     const t = window.setInterval(() => {
       // Rotating under the user's caret is disorienting — hold while focused.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDelete, type DeleteTarget } from "./components/ConfirmDelete";
 import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { StatusBar } from "./components/StatusBar";
@@ -196,6 +196,29 @@ export default function App() {
   const handleTreeKeySelect = useCallback(
     (row: Row) => select(row.id),
     [select],
+  );
+
+  // Only a pure `ext:` filter is treated as a type list; anything else
+  // (names, sizes) starts fresh so the box never lies about the filter.
+  const { filter } = scan;
+  const activeExts = useMemo(
+    () => filter?.match(/^ext:([^\s]+)$/)?.[1].split(",") ?? [],
+    [filter],
+  );
+
+  const { setFilter } = scan;
+  const handleFilterType = useCallback(
+    (ext: string, additive: boolean) => {
+      const next = additive
+        ? activeExts.includes(ext)
+          ? activeExts.filter((e) => e !== ext)
+          : [...activeExts, ext]
+        : activeExts.length === 1 && activeExts[0] === ext
+          ? []
+          : [ext];
+      setFilter(next.length > 0 ? `ext:${next.join(",")}` : null);
+    },
+    [activeExts, setFilter],
   );
 
   const copyPath = useCallback(
@@ -416,6 +439,8 @@ export default function App() {
               hideSystem={scan.hideSystem}
               filter={scan.filter}
               onSelectFile={handlePanelFileSelect}
+              activeExts={activeExts}
+              onFilterType={handleFilterType}
             />
           )}
         </div>
