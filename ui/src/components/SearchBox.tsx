@@ -52,10 +52,13 @@ export function SearchBox({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Filters can be set from outside (type-panel clicks) — the box adopts
-  // the query text so it never lies. Never stomp text mid-typing.
+  // the query text so it never lies, but silently: adopted text must not
+  // pop the results dropdown the way typed text does. Never stomp typing.
+  const adoptedRef = useRef(false);
   useEffect(() => {
     if (activeFilter === null) return;
     if (document.activeElement === inputRef.current) return;
+    adoptedRef.current = true;
     setText(activeFilter);
   }, [activeFilter]);
 
@@ -70,7 +73,8 @@ export function SearchBox({
 
   useEffect(() => {
     const seq = ++seqRef.current;
-    if (generation === 0 || text.trim() === "") {
+    if (generation === 0 || text.trim() === "" || adoptedRef.current) {
+      adoptedRef.current = false;
       setResults(null);
       setOpen(false);
       return;
@@ -173,7 +177,10 @@ export function SearchBox({
       <input
         ref={inputRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          adoptedRef.current = false;
+          setText(e.target.value);
+        }}
         onFocus={() => {
           if (results && text.trim() !== "") setOpen(true);
         }}
@@ -191,7 +198,14 @@ export function SearchBox({
       />
       {activeFilter && (
         <button
-          onClick={() => onApplyFilter(null)}
+          onClick={() => {
+            // ✕ clears the filter AND the box — a lingering query one
+            // Enter away from resurrecting the filter reads as broken.
+            onApplyFilter(null);
+            setText("");
+            setResults(null);
+            setOpen(false);
+          }}
           title={`Stop filtering by "${activeFilter}"`}
           aria-label="Clear the view filter"
           className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-accent-ink hover:bg-raised"
