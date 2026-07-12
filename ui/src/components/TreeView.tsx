@@ -65,6 +65,63 @@ function flatten(
   return out;
 }
 
+const NAV_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Enter",
+]);
+
+type NavAction =
+  | { kind: "step"; index: number }
+  | { kind: "toggle"; id: number }
+  | { kind: "open"; row: Row };
+
+function navAction(
+  key: string,
+  flat: FlatRow[],
+  selectedIndex: number,
+  expanded: ReadonlySet<number>,
+): NavAction | null {
+  if (selectedIndex < 0) {
+    const wantsFirst = key === "ArrowDown" || key === "ArrowUp";
+    return wantsFirst && flat.length > 0 ? { kind: "step", index: 0 } : null;
+  }
+  const { row, depth } = flat[selectedIndex];
+  switch (key) {
+    case "ArrowDown":
+      return selectedIndex + 1 < flat.length
+        ? { kind: "step", index: selectedIndex + 1 }
+        : null;
+    case "ArrowUp":
+      return selectedIndex > 0
+        ? { kind: "step", index: selectedIndex - 1 }
+        : null;
+    case "ArrowRight": {
+      if (!row.isDir || !row.hasChildren) return null;
+      if (!expanded.has(row.id)) return { kind: "toggle", id: row.id };
+      const next = selectedIndex + 1;
+      return next < flat.length && flat[next].depth > depth
+        ? { kind: "step", index: next }
+        : null;
+    }
+    case "ArrowLeft": {
+      if (row.isDir && row.hasChildren && expanded.has(row.id)) {
+        return { kind: "toggle", id: row.id };
+      }
+      for (let i = selectedIndex - 1; i >= 0; i--) {
+        if (flat[i].depth < depth) return { kind: "step", index: i };
+      }
+      return null;
+    }
+    case "Enter":
+      return { kind: "open", row };
+    default:
+      return null;
+  }
+}
+
 interface TreeRowProps {
   flat: FlatRow[];
   cols: ColumnPlan;
@@ -259,6 +316,8 @@ export interface TreeViewProps {
   onRevealed: () => void;
   onToggle: (id: number) => void;
   onSelect: (row: Row) => void;
+  /** Arrow-key selection: select only — Enter (onSelect) moves the view. */
+  onKeySelect: (row: Row) => void;
   onHoverRow: (id: number | null) => void;
   onContext: (id: number, x: number, y: number) => void;
   onSort: (key: SortKey) => void;
@@ -276,6 +335,7 @@ export function TreeView({
   onRevealed,
   onToggle,
   onSelect,
+  onKeySelect,
   onHoverRow,
   onContext,
   onSort,
@@ -297,8 +357,34 @@ export function TreeView({
     // else: listings are still loading; retry when `flat` changes.
   }, [revealId, flat, listRef, onRevealed]);
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!NAV_KEYS.has(e.key)) return;
+    e.preventDefault();
+    const selectedIndex =
+      selected === null ? -1 : flat.findIndex((f) => f.row.id === selected);
+    const action = navAction(e.key, flat, selectedIndex, expanded);
+    if (!action) return;
+    if (action.kind === "step") {
+      onKeySelect(flat[action.index].row);
+      listRef.current?.scrollToRow({
+        index: action.index,
+        align: "smart",
+        behavior: "auto",
+      });
+    } else if (action.kind === "toggle") {
+      onToggle(action.id);
+    } else {
+      onSelect(action.row);
+    }
+  };
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col outline-none"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
       <Header cols={cols} sort={sort} onSort={onSort} />
       <div className="min-h-0 flex-1" onMouseLeave={() => onHoverRow(null)}>
         <List

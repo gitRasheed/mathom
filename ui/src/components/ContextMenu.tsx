@@ -1,10 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-export interface MenuItem {
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}
+export type MenuItem =
+  | { label: string; onClick: () => void; danger?: boolean }
+  | { separator: true };
 
 interface ContextMenuProps {
   x: number;
@@ -50,20 +48,24 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         style={{ left: pos.x, top: pos.y }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {items.map((item, i) => (
-          <button
-            key={i}
-            className={`flex w-full items-center px-3 py-1.5 text-left hover:bg-raised ${
-              item.danger ? "text-danger-ink" : "text-ink"
-            }`}
-            onClick={() => {
-              item.onClick();
-              onClose();
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
+        {items.map((item, i) =>
+          "separator" in item ? (
+            <div key={i} className="mx-1 my-1 border-t border-edge" />
+          ) : (
+            <button
+              key={i}
+              className={`flex w-full items-center px-3 py-1.5 text-left hover:bg-raised ${
+                item.danger ? "text-danger-ink" : "text-ink"
+              }`}
+              onClick={() => {
+                item.onClick();
+                onClose();
+              }}
+            >
+              {item.label}
+            </button>
+          ),
+        )}
       </div>
     </div>
   );

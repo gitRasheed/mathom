@@ -111,7 +111,13 @@ export interface TreemapProps {
   onSelect: (rect: TreemapRect) => void;
   onHover: (id: number | null) => void;
   onNavigate: (id: number) => void;
-  onContext: (id: number, x: number, y: number) => void;
+  onContext: (id: number, x: number, y: number, zoom: ZoomTargets) => void;
+}
+
+/** Right-click zoom targets: null = that direction isn't available here. */
+export interface ZoomTargets {
+  inId: number | null;
+  outId: number | null;
 }
 
 export function Treemap({
@@ -583,10 +589,16 @@ export function Treemap({
     (e: React.MouseEvent) => {
       e.preventDefault();
       const bounds = containerRef.current!.getBoundingClientRect();
-      const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
-      if (hit) onContext(hit.id, e.clientX, e.clientY);
+      const cssX = e.clientX - bounds.left;
+      const cssY = e.clientY - bounds.top;
+      const hit = hitTest(cssX, cssY);
+      if (!hit) return;
+      onContext(hit.id, e.clientX, e.clientY, {
+        inId: regionAt(cssX, cssY)?.id ?? null,
+        outId: crumbs.length >= 2 ? crumbs[crumbs.length - 2].id : null,
+      });
     },
-    [hitTest, onContext],
+    [hitTest, regionAt, crumbs, onContext],
   );
 
   const handleDoubleClick = useCallback(

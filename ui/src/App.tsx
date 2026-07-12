@@ -4,7 +4,7 @@ import { ContextMenu, type MenuItem } from "./components/ContextMenu";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { TreeView } from "./components/TreeView";
-import { Treemap } from "./components/Treemap";
+import { Treemap, type ZoomTargets } from "./components/Treemap";
 import { TypePanel } from "./components/TypePanel";
 import { useScan } from "./hooks/useScan";
 import { useTheme } from "./hooks/useTheme";
@@ -30,6 +30,22 @@ const targetFrom = (r: Row): DeleteTarget => ({
   items: r.items,
 });
 
+const zoomMenuItems = (
+  zoom: ZoomTargets,
+  atScanRoot: boolean,
+  navigate: (id: number) => void,
+): MenuItem[] => {
+  const { inId, outId } = zoom;
+  const items: MenuItem[] = [];
+  if (inId !== null)
+    items.push({ label: "Zoom in", onClick: () => navigate(inId) });
+  if (outId !== null)
+    items.push({ label: "Zoom out", onClick: () => navigate(outId) });
+  if (!atScanRoot)
+    items.push({ label: "Reset zoom", onClick: () => navigate(0) });
+  return items;
+};
+
 export default function App() {
   const scan = useScan();
   const theme = useTheme();
@@ -45,6 +61,7 @@ export default function App() {
     x: number;
     y: number;
     target: DeleteTarget;
+    zoom?: ZoomTargets;
   } | null>(null);
   const [confirm, setConfirm] = useState<{
     target: DeleteTarget;
@@ -163,17 +180,22 @@ export default function App() {
   const handleRevealed = useCallback(() => setRevealId(null), []);
 
   const handleContextMenu = useCallback(
-    (id: number, x: number, y: number) => {
+    (id: number, x: number, y: number, zoom?: ZoomTargets) => {
       if (generation === 0 || id === 0) return;
       select(id);
       api
         .getNode(generation, id)
         .then((node) => {
-          if (node) setMenu({ x, y, target: targetFrom(node) });
+          if (node) setMenu({ x, y, target: targetFrom(node), zoom });
         })
         .catch((e) => reportUnlessStale("opening menu", e));
     },
     [generation, select],
+  );
+
+  const handleTreeKeySelect = useCallback(
+    (row: Row) => select(row.id),
+    [select],
   );
 
   const copyPath = useCallback(
@@ -249,6 +271,9 @@ export default function App() {
     [start],
   );
 
+  const zoomItems = menu?.zoom
+    ? zoomMenuItems(menu.zoom, viewRootId === 0, handleNavigate)
+    : [];
   const menuItems: MenuItem[] = menu
     ? [
         {
@@ -264,6 +289,9 @@ export default function App() {
           danger: true,
           onClick: () => setConfirm({ target: menu.target, permanent: false }),
         },
+        ...(zoomItems.length > 0
+          ? [{ separator: true } as const, ...zoomItems]
+          : []),
       ]
     : [];
 
@@ -350,6 +378,7 @@ export default function App() {
               onRevealed={handleRevealed}
               onToggle={scan.toggleExpand}
               onSelect={handleTreeSelect}
+              onKeySelect={handleTreeKeySelect}
               onHoverRow={setHoveredId}
               onContext={handleContextMenu}
               onSort={scan.changeSort}
