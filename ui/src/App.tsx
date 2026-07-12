@@ -230,8 +230,13 @@ export default function App() {
       const res = await api.deleteEntry(generation, target.id, permanent);
       setConfirm(null);
       if (selected === target.id) {
-        setSelected(null);
-        setSelectedPath(null);
+        // Land on the parent so keyboard navigation continues from there.
+        if (res.parentId != null) {
+          select(res.parentId);
+        } else {
+          setSelected(null);
+          setSelectedPath(null);
+        }
       }
       if (res.parentId != null) {
         setViewRootId((vr) => (vr === target.id ? res.parentId! : vr));
@@ -242,7 +247,7 @@ export default function App() {
     } finally {
       setDeleteBusy(false);
     }
-  }, [confirm, generation, selected]);
+  }, [confirm, generation, selected, select]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -37,8 +37,14 @@ export function ConfirmDelete({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
 
+  // On close, focus returns to whatever opened the dialog (keyboard flow:
+  // the tree pane), so arrow-key navigation continues without a re-click.
   useEffect(() => {
+    const opener = document.activeElement;
     cancelRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
 
   // Arrows cycle the enabled controls; Enter/Space then act natively on
