@@ -1,5 +1,5 @@
 import type { Snapshot } from "../lib/api";
-import { formatElapsed, formatNumber } from "../lib/format";
+import { formatBytes, formatElapsed, formatNumber } from "../lib/format";
 
 interface StatusBarProps {
   snapshot: Snapshot | null;
@@ -24,6 +24,12 @@ function stateLabel(snapshot: Snapshot | null): string {
 
 export function StatusBar({ snapshot, selectedPath, uiError }: StatusBarProps) {
   const state = snapshot?.state;
+  const rate =
+    snapshot && snapshot.elapsedMs > 0
+      ? Math.round(
+          (snapshot.files + snapshot.dirs) / (snapshot.elapsedMs / 1000),
+        )
+      : 0;
   return (
     <footer className="flex h-7 items-center gap-3 border-t border-edge px-3 text-xs text-ink-4">
       <span
@@ -37,6 +43,14 @@ export function StatusBar({ snapshot, selectedPath, uiError }: StatusBarProps) {
       >
         {stateLabel(snapshot)}
       </span>
+      {snapshot !== null && state !== "idle" && (
+        <span className="tnum shrink-0">
+          {formatNumber(snapshot.files)} files · {formatNumber(snapshot.dirs)}{" "}
+          folders · {formatBytes(snapshot.bytes)}
+          {state === "scanning" &&
+            ` · ${formatElapsed(snapshot.elapsedMs)} · ${formatNumber(rate)}/s`}
+        </span>
+      )}
       {uiError && (
         <span
           className="max-w-96 shrink-0 truncate text-danger-ink"

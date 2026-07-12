@@ -13,15 +13,19 @@ const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
 ];
 
 interface SettingsMenuProps {
+  hideSystem: boolean;
   themePref: ThemePref;
   accent: AccentName;
+  onToggleHideSystem: () => void;
   onThemePref: (pref: ThemePref) => void;
   onAccent: (accent: AccentName) => void;
 }
 
 export function SettingsMenu({
+  hideSystem,
   themePref,
   accent,
+  onToggleHideSystem,
   onThemePref,
   onAccent,
 }: SettingsMenuProps) {
@@ -63,6 +67,21 @@ export function SettingsMenu({
       {open && (
         <div className="absolute top-9 right-0 z-50 w-52 rounded-md border border-edge-strong bg-panel p-3 shadow-xl">
           <div className="text-[11px] font-medium tracking-wide text-ink-4 uppercase">
+            View
+          </div>
+          <label
+            className="mt-1.5 flex cursor-pointer items-center gap-2 text-[12px] text-ink-2"
+            title="Hide OS/system files (pagefile, hiberfil, System Volume Information, …)"
+          >
+            <input
+              type="checkbox"
+              className="accent-accent"
+              checked={hideSystem}
+              onChange={onToggleHideSystem}
+            />
+            Hide system files
+          </label>
+          <div className="mt-3 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
             Theme
           </div>
           <div className="mt-1.5 flex rounded-md border border-edge p-0.5">

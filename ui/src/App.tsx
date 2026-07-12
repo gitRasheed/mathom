@@ -331,7 +331,6 @@ export default function App() {
     <div className="flex h-full flex-col">
       <Toolbar
         scanning={scan.scanning}
-        snapshot={scan.snapshot}
         generation={generation}
         viewRootId={viewRootId}
         startError={scan.startError}

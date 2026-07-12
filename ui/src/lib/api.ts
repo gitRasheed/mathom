@@ -106,6 +106,15 @@ export interface ElevationStatus {
   devBuild: boolean;
 }
 
+export interface DriveInfo {
+  /** Root path as the scanner expects it, e.g. `C:\`. */
+  path: string;
+  /** Volume label; empty when the volume has none. */
+  label: string;
+  total: number;
+  free: number;
+}
+
 export type ExportFormat = "csv" | "json";
 
 export interface ExportArgs {
@@ -195,6 +204,7 @@ export const api = {
     format: ExportFormat,
     args: ExportArgs,
   ) => invoke<ExportText>("export_text", { generation, rootId, format, args }),
+  listDrives: () => invoke<DriveInfo[]>("list_drives"),
   elevationStatus: () => invoke<ElevationStatus>("elevation_status"),
   /** Resolves only on decline (as an error); on success the app exits. */
   relaunchElevated: () => invoke<void>("relaunch_elevated"),

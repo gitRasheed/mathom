@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod drives;
 mod elevation;
 mod protected;
 mod scan;
@@ -25,6 +26,7 @@ fn main() {
             scan::export_tree,
             scan::export_text,
             scan::open_in_explorer,
+            drives::list_drives,
             elevation::elevation_status,
             elevation::relaunch_elevated,
         ])

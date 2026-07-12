@@ -94,13 +94,26 @@ export function ExportMenu({
             ? "Export needs a finished scan"
             : "Export the current view as CSV or JSON"
         }
-        className={`ml-1 h-8 shrink-0 rounded-md border px-3 text-[12px] disabled:cursor-not-allowed disabled:opacity-40 ${
+        aria-label="Export"
+        className={`ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border disabled:cursor-not-allowed disabled:opacity-40 ${
           open
             ? "border-edge-strong bg-raised text-ink"
             : "border-edge bg-panel text-ink-4 hover:bg-raised hover:text-ink-2"
         }`}
       >
-        Export
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M7 1.5v7M4 6l3 3 3-3" />
+          <path d="M2 10.5V12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5" />
+        </svg>
       </button>
       {open && (
         <div className="absolute top-9 right-0 z-50 w-56 rounded-md border border-edge-strong bg-panel p-3 shadow-xl">
