@@ -14,7 +14,7 @@ const HINTS = [
   "Try >500mb — filter by size",
   "Enter filters the whole view",
 ];
-const HINT_MS = 4000;
+const HINT_MS = 7000;
 
 interface SearchBoxProps {
   generation: number;
@@ -52,10 +52,11 @@ export function SearchBox({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const t = window.setInterval(
-      () => setHint((h) => (h + 1) % HINTS.length),
-      HINT_MS,
-    );
+    const t = window.setInterval(() => {
+      // Rotating under the user's caret is disorienting — hold while focused.
+      if (document.activeElement === inputRef.current) return;
+      setHint((h) => (h + 1) % HINTS.length);
+    }, HINT_MS);
     return () => window.clearInterval(t);
   }, []);
 

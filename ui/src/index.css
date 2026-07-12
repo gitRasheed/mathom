@@ -78,12 +78,17 @@ body {
   overflow: hidden;
 }
 
-/* Body disables selection for an app feel; inputs must keep it. */
-input,
+/* Body disables selection for an app feel; text inputs must keep it.
+   Checkboxes are also <input> — without the :not they'd get an I-beam. */
+input:not([type="checkbox"]),
 textarea {
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
+}
+
+input[type="checkbox"] {
+  cursor: pointer;
 }
 
 .tnum {
