@@ -4,6 +4,7 @@ import { ExportMenu } from "./ExportMenu";
 import { ScanMenu } from "./ScanMenu";
 import { SearchBox } from "./SearchBox";
 import { SettingsMenu } from "./SettingsMenu";
+import { WindowControls } from "./WindowControls";
 
 interface ToolbarProps {
   scanning: boolean;
@@ -45,7 +46,12 @@ export function Toolbar({
   onAccent,
 }: ToolbarProps) {
   return (
-    <header className="flex items-center gap-2 border-b border-edge px-3 py-2">
+    // The toolbar IS the title bar (undecorated window): empty space drags
+    // the window and double-click maximizes; children stay interactive.
+    <header
+      data-tauri-drag-region
+      className="flex items-center gap-2 border-b border-edge px-3 py-2"
+    >
       {scanning ? (
         <button
           onClick={onCancel}
@@ -105,6 +111,7 @@ export function Toolbar({
         onThemePref={onThemePref}
         onAccent={onAccent}
       />
+      <WindowControls />
     </header>
   );
 }
