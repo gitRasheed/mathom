@@ -198,8 +198,7 @@ export default function App() {
     [select],
   );
 
-  // Only a pure `ext:` filter is treated as a type list; anything else
-  // (names, sizes) starts fresh so the box never lies about the filter.
+  // Only a pure `ext:` filter is treated as the active type list; other queries start fresh.
   const { filter } = scan;
   const activeExts = useMemo(
     () => filter?.match(/^ext:([^\s]+)$/)?.[1].split(",") ?? [],

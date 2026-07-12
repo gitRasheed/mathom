@@ -8,11 +8,7 @@ import {
   saveThemeSettings,
 } from "../lib/theme";
 
-/**
- * Owns the theme/accent settings: applies them to the document, persists
- * them, and follows the OS theme while the preference is "system".
- * `themeRev` bumps on every applied change so canvas renderers can re-bake.
- */
+/** Applies + persists theme/accent, follows the OS under "system"; `themeRev` bumps so canvas renderers re-bake. */
 export function useTheme() {
   const [pref, setPref] = useState<ThemePref>(loadThemePref);
   const [accent, setAccent] = useState<AccentName>(loadAccent);

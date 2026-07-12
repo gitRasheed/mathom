@@ -12,10 +12,7 @@ import { ChevronIcon } from "./icons";
 
 const ROW_HEIGHT = 28;
 
-// The name column always flexes and never drops below NAME_MIN: trailing
-// columns appear one by one (most useful first) only while the name stays
-// readable. At the 560px default pane that means no Modified column; at the
-// 320px pane minimum, name + size only.
+// The name column flexes but never drops below NAME_MIN; trailing columns drop one by one as the pane narrows.
 const NAME_MIN = 220;
 const SIZE_W = 100;
 const PCT_W = 136;

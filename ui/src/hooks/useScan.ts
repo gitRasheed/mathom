@@ -161,7 +161,7 @@ export function useScan(): ScanController {
         setRootRow(null);
         setChildrenMap(new Map());
         setExpanded(new Set([0]));
-        setFilterState(null); // a new scan starts unfiltered
+        setFilterState(null);
         // Tiny scans can finish before the listener sees this generation.
         const s = await api.scanStatus();
         if (s.generation === gen) setSnapshot(s);
@@ -250,8 +250,7 @@ export function useScan(): ScanController {
 
   const setFilter = useCallback((query: string | null) => {
     const next = query && query.trim() !== "" ? query : null;
-    // Eager ref update: a reveal fired in the same tick (jump-to after a
-    // filter clear) must fetch with the new filter, not the stale one.
+    // Eager ref update: a same-tick reveal must fetch with the new filter, not the stale one.
     filterRef.current = next;
     setFilterState(next);
   }, []);

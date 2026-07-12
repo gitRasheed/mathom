@@ -30,15 +30,13 @@ export function ConfirmDelete({
   onCancel,
   onConfirm,
 }: ConfirmDeleteProps) {
-  // Confirm stays disabled until the preflight lands: it carries the path
-  // shown to the user and whether policy blocks this delete outright.
+  // Confirm stays disabled until the preflight (path + policy block reason) lands.
   const [preflight, setPreflight] = useState<DeletePreflight | null>(null);
   const checkboxRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
 
-  // On close, focus returns to whatever opened the dialog (keyboard flow:
-  // the tree pane), so arrow-key navigation continues without a re-click.
+  // On close, focus returns to the opener so arrow-key navigation continues without a re-click.
   useEffect(() => {
     const opener = document.activeElement;
     cancelRef.current?.focus();
@@ -47,8 +45,7 @@ export function ConfirmDelete({
     };
   }, []);
 
-  // Arrows cycle the enabled controls; Enter/Space then act natively on
-  // whichever is focused. Escape (below) and Tab stay untouched.
+  // Arrows cycle the enabled controls; Enter/Space act natively; Escape and Tab stay untouched.
   const handleKeyDown = (e: React.KeyboardEvent) => {
     const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
     const backward = e.key === "ArrowLeft" || e.key === "ArrowUp";

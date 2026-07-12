@@ -53,8 +53,7 @@ export function TypePanel({
     const seq = ++seqRef.current;
     lastFetchRef.current = performance.now();
     const full = api.getTypeStats(generation, rootId, hideSystem, filter);
-    // Facet self-exclusion: a pure type filter must not hide the other type
-    // rows or the picker eats its own menu. Totals/largest stay filtered.
+    // Facet self-exclusion: the type rows ignore a pure type filter; totals/largest stay filtered.
     const picker =
       activeExts.length > 0
         ? api.getTypeStats(generation, rootId, hideSystem, null)

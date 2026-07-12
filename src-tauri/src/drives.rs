@@ -42,8 +42,7 @@ fn list() -> Vec<DriveInfo> {
             continue;
         }
         let (mut total, mut free) = (0u64, 0u64);
-        // Fails on media-less removables (card readers, DVD drives) —
-        // nothing to scan there, so skip rather than show a dead entry.
+        // Fails on media-less removables (card readers, DVD drives) — skip, nothing to scan.
         if unsafe { GetDiskFreeSpaceExW(root, None, Some(&mut total), Some(&mut free)) }.is_err() {
             continue;
         }

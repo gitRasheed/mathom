@@ -1,5 +1,4 @@
-// Every inline SVG glyph lives here, so sizes, stroke weights, and
-// viewBoxes stay consistent. All draw in currentColor.
+// Every inline SVG glyph lives here so sizes and strokes stay consistent; all draw in currentColor.
 
 import type { CSSProperties } from "react";
 

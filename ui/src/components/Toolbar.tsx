@@ -47,8 +47,7 @@ export function Toolbar({
   onAccent,
 }: ToolbarProps) {
   return (
-    // The toolbar IS the title bar (undecorated window): empty space drags
-    // the window and double-click maximizes; children stay interactive.
+    // The toolbar is the title bar (undecorated window): drag-region spacers drag it; children stay interactive.
     <header
       data-tauri-drag-region
       className="flex items-center gap-2 border-b border-edge px-3 py-2"
@@ -66,8 +65,6 @@ export function Toolbar({
       {startError && (
         <span className="text-xs text-danger-ink">{startError}</span>
       )}
-      {/* Spacers carry the drag region — a plain div would swallow the
-          mousedown that should drag the window. */}
       <div data-tauri-drag-region className="min-w-4 flex-1" />
       <div className="shrink-0">
         <SearchBox

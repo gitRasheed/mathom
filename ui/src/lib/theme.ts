@@ -1,6 +1,4 @@
-// Theme + accent. Neutral tokens live in index.css (dark defaults, light
-// overrides via [data-theme]); the accent family is owned here because the
-// user can change it, and each theme wants different steps of the same ramp.
+// Neutral tokens live in index.css ([data-theme] overrides); the user-configurable accent ramp is owned here, with per-theme steps.
 
 export type ThemePref = "system" | "light" | "dark";
 

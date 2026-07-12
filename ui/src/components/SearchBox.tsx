@@ -7,7 +7,6 @@ import { formatBytes, formatNumber } from "../lib/format";
 
 const DEBOUNCE_MS = 150;
 
-// Rotating placeholder: the grammar teaches itself, no docs required.
 const HINTS = [
   "Search names…",
   "Try ext:mp4 — filter by type",
@@ -51,9 +50,7 @@ export function SearchBox({
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filters can be set from outside (type-panel clicks) — the box adopts
-  // the query text so it never lies, but silently: adopted text must not
-  // pop the results dropdown the way typed text does. Never stomp typing.
+  // The box adopts externally-set filters; adopted text must not open the dropdown.
   const adoptedRef = useRef(false);
   useEffect(() => {
     if (activeFilter === null) return;
@@ -123,9 +120,7 @@ export function SearchBox({
 
   const choose = useCallback(
     (hit: SearchHit) => {
-      // A jump targets the real tree: when the box query isn't the applied
-      // filter, the hit may be hidden by it — drop the filter first. Same
-      // query = the hit is visible by construction, keep filtering.
+      // When the box query isn't the applied filter, the hit may be filter-hidden — drop the filter first.
       if (activeFilter && text.trim() !== activeFilter) onApplyFilter(null);
       onSelect(hit);
       setOpen(false);
@@ -199,8 +194,6 @@ export function SearchBox({
       {activeFilter && (
         <button
           onClick={() => {
-            // ✕ clears the filter AND the box — a lingering query one
-            // Enter away from resurrecting the filter reads as broken.
             onApplyFilter(null);
             setText("");
             setResults(null);

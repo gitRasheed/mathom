@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CloseIcon, MaximizeIcon, MinimizeIcon, RestoreIcon } from "./icons";
 
-/** Minimize / maximize / close for the undecorated window; the buttons
- *  stretch to the toolbar's full height and sit flush with the edge. */
+/** Minimize/maximize/close for the undecorated window; buttons stretch the toolbar's full height, flush with the edge. */
 export function WindowControls() {
   const [maximized, setMaximized] = useState(false);
 
