@@ -52,10 +52,16 @@ export function TypePanel({
     if (generation === 0) return;
     const seq = ++seqRef.current;
     lastFetchRef.current = performance.now();
-    api
-      .getTypeStats(generation, rootId, hideSystem, filter)
-      .then((d) => {
-        if (seq === seqRef.current) setData(d);
+    const full = api.getTypeStats(generation, rootId, hideSystem, filter);
+    // Facet self-exclusion: a pure type filter must not hide the other type
+    // rows or the picker eats its own menu. Totals/largest stay filtered.
+    const picker =
+      activeExts.length > 0
+        ? api.getTypeStats(generation, rootId, hideSystem, null)
+        : full;
+    Promise.all([full, picker])
+      .then(([f, p]) => {
+        if (seq === seqRef.current) setData({ ...f, types: p.types });
       })
       .catch((e) => {
         // The tree can still be empty at scan start; ticks retry naturally.
@@ -63,7 +69,7 @@ export function TypePanel({
           reportUnlessStale("loading file types", e);
         }
       });
-  }, [generation, rootId, hideSystem, filter]);
+  }, [generation, rootId, hideSystem, filter, activeExts]);
 
   useEffect(() => {
     setData(null);
