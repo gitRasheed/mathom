@@ -38,7 +38,7 @@ fn main() {
         .expect("error while running mathom");
 }
 
-/// Open at 75% of the monitor, centered — one fixed size reads wrong on
+/// Open at 65% of the monitor, centered — one fixed size reads wrong on
 /// laptops and 4K displays alike. Min sizes from the config still apply.
 fn size_to_monitor(app: &tauri::App) {
     use tauri::Manager;
@@ -50,8 +50,8 @@ fn size_to_monitor(app: &tauri::App) {
     };
     let size = mon.size();
     let _ = win.set_size(tauri::PhysicalSize::new(
-        size.width * 3 / 4,
-        size.height * 3 / 4,
+        size.width * 13 / 20,
+        size.height * 13 / 20,
     ));
     let _ = win.center();
 }
