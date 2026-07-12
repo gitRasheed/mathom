@@ -290,6 +290,12 @@ impl TreeBuilder {
         self.tree.names.release_index()
     }
 
+    /// Trims doubling-growth slack from the arena after the last `add_batch`.
+    pub fn shrink_to_fit(&mut self) {
+        self.tree.nodes.shrink_to_fit();
+        self.tree.names.shrink_to_fit();
+    }
+
     pub fn remove(&mut self, id: NodeId) -> Option<Removed> {
         self.tree.remove_subtree(id)
     }

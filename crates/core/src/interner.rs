@@ -54,6 +54,11 @@ impl NameInterner {
         std::mem::take(&mut self.map)
     }
 
+    /// Offsets in outstanding `NameRef`s survive: contents are unchanged.
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.bytes.shrink_to_fit();
+    }
+
     /// Total bytes of unique name data stored.
     pub fn bytes_used(&self) -> usize {
         self.bytes.len()

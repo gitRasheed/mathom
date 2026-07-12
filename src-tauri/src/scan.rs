@@ -821,7 +821,11 @@ fn drain(app: AppHandle, session: Arc<Session>) {
             ScanEvent::Done(stats) => {
                 // Bound (not dropped) so the ~100ms deallocation happens at
                 // scope exit, after the Done emit and outside the write lock.
-                let _dead_name_index = session.builder.write().unwrap().release_name_index();
+                let _dead_name_index = {
+                    let mut b = session.builder.write().unwrap();
+                    b.shrink_to_fit();
+                    b.release_name_index()
+                };
                 {
                     let mut p = session.progress.lock().unwrap();
                     p.files = stats.files;
@@ -850,7 +854,11 @@ fn drain(app: AppHandle, session: Arc<Session>) {
     }
 
     // Done is mandatory; EOF means the worker died without reporting it.
-    let _dead_name_index = session.builder.write().unwrap().release_name_index();
+    let _dead_name_index = {
+        let mut b = session.builder.write().unwrap();
+        b.shrink_to_fit();
+        b.release_name_index()
+    };
     {
         let mut p = session.progress.lock().unwrap();
         p.errors += 1;
