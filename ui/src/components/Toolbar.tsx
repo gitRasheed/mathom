@@ -5,6 +5,7 @@ import { ScanMenu } from "./ScanMenu";
 import { SearchBox } from "./SearchBox";
 import { SettingsMenu } from "./SettingsMenu";
 import { WindowControls } from "./WindowControls";
+import { PanelRightIcon } from "./icons";
 
 interface ToolbarProps {
   scanning: boolean;
@@ -85,17 +86,7 @@ export function Toolbar({
             : "border-edge bg-panel text-ink-4 hover:bg-raised hover:text-ink-2"
         }`}
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.3"
-        >
-          <rect x="1" y="2" width="12" height="10" rx="1.5" />
-          <line x1="9" y1="2" x2="9" y2="12" />
-        </svg>
+        <PanelRightIcon />
       </button>
       <ExportMenu
         generation={generation}

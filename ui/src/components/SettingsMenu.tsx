@@ -5,6 +5,7 @@ import {
   type ThemePref,
   accentSwatch,
 } from "../lib/theme";
+import { PaletteIcon } from "./icons";
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "system", label: "System" },
@@ -60,9 +61,7 @@ export function SettingsMenu({
             : "border-edge bg-panel text-ink-4 hover:bg-raised hover:text-ink-2"
         }`}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-          <path d="M7 0a7 7 0 0 0 0 14c.83 0 1.4-.6 1.4-1.3 0-.35-.14-.66-.36-.9a1.27 1.27 0 0 1 .95-2.13h1.57A3.43 3.43 0 0 0 14 6.24C13.88 2.72 10.76 0 7 0Zm-4.55 7a1.05 1.05 0 1 1 0-2.1 1.05 1.05 0 0 1 0 2.1Zm2.8-3.5a1.05 1.05 0 1 1 0-2.1 1.05 1.05 0 0 1 0 2.1Zm3.5 0a1.05 1.05 0 1 1 0-2.1 1.05 1.05 0 0 1 0 2.1Zm2.8 3.5a1.05 1.05 0 1 1 0-2.1 1.05 1.05 0 0 1 0 2.1Z" />
-        </svg>
+        <PaletteIcon />
       </button>
       {open && (
         <div className="absolute top-9 right-0 z-50 w-52 rounded-md border border-edge-strong bg-panel p-3 shadow-xl">

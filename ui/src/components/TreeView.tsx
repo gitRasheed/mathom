@@ -8,6 +8,7 @@ import {
   formatNumber,
   formatPercent,
 } from "../lib/format";
+import { ChevronIcon } from "./icons";
 
 const ROW_HEIGHT = 28;
 
@@ -183,15 +184,10 @@ function TreeRow({
               onToggle(row.id);
             }}
           >
-            <svg
-              width="8"
-              height="8"
-              viewBox="0 0 8 8"
+            <ChevronIcon
               className={expanded.has(row.id) ? "rotate-90" : ""}
               style={{ transition: "transform 120ms" }}
-            >
-              <path d="M2 0 L7 4 L2 8 Z" fill="currentColor" />
-            </svg>
+            />
           </button>
         ) : (
           <span className="mr-1 h-4 w-4 shrink-0" />

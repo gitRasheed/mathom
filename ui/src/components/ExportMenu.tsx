@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api, type ExportFormat } from "../lib/api";
 import { copyText } from "../lib/clipboard";
+import { ExportIcon } from "./icons";
 
 const DEPTHS = ["all", "1", "2", "3"] as const;
 type Depth = (typeof DEPTHS)[number];
@@ -101,19 +102,7 @@ export function ExportMenu({
             : "border-edge bg-panel text-ink-4 hover:bg-raised hover:text-ink-2"
         }`}
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M7 1.5v7M4 6l3 3 3-3" />
-          <path d="M2 10.5V12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5" />
-        </svg>
+        <ExportIcon />
       </button>
       {open && (
         <div className="absolute top-9 right-0 z-50 w-56 rounded-md border border-edge-strong bg-panel p-3 shadow-xl">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type DriveInfo } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { ChevronIcon } from "./icons";
 
 interface ScanMenuProps {
   onScan: (path: string) => void;
@@ -54,9 +55,7 @@ export function ScanMenu({ onScan }: ScanMenuProps) {
         className="flex h-8 items-center gap-1.5 rounded-md bg-accent px-4 text-[13px] font-medium text-white hover:bg-accent-hover"
       >
         Scan
-        <svg width="8" height="8" viewBox="0 0 8 8" className="rotate-90">
-          <path d="M2 0 L7 4 L2 8 Z" fill="currentColor" />
-        </svg>
+        <ChevronIcon className="rotate-90" />
       </button>
       {open && (
         <div className="absolute top-9 left-0 z-50 w-80 rounded-md border border-edge-strong bg-panel py-1 shadow-xl">
