@@ -50,7 +50,7 @@ export function ExportIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M7 1.5v7M4 6l3 3 3-3" />
+      <path d="M7 8.5v-7M4 4l3-3 3 3" />
       <path d="M2 10.5V12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5" />
     </svg>
   );

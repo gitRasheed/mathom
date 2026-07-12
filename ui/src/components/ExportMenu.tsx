@@ -159,7 +159,7 @@ export function ExportMenu({
               }}
               placeholder="3+"
               title="Any depth — type a number"
-              className={`h-6 flex-1 rounded text-center text-[12px] outline-none placeholder:text-ink-5 ${
+              className={`h-6 w-0 min-w-0 flex-1 rounded text-center text-[12px] outline-none placeholder:text-ink-5 ${
                 !DEPTHS.includes(depth as (typeof DEPTHS)[number])
                   ? "bg-raised text-ink"
                   : "bg-transparent text-ink-4 hover:text-ink-2"
