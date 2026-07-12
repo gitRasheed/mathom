@@ -63,7 +63,8 @@ pub fn assemble(
     for i in 0..n {
         starts[i + 1] = starts[i] + child_count[i];
     }
-    let mut cursor: Vec<u32> = starts[..n].to_vec();
+    let mut cursor = child_count;
+    cursor.copy_from_slice(&starts[..n]);
     let mut children = vec![0u32; starts[n] as usize];
     for (i, &is_linked) in linked.iter().enumerate() {
         if is_linked {

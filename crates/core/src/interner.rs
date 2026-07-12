@@ -50,6 +50,10 @@ impl NameInterner {
         resolve(&self.bytes, r)
     }
 
+    pub(crate) fn release_index(&mut self) -> HashMap<u64, Vec<NameRef>> {
+        std::mem::take(&mut self.map)
+    }
+
     /// Total bytes of unique name data stored.
     pub fn bytes_used(&self) -> usize {
         self.bytes.len()
@@ -97,5 +101,17 @@ mod tests {
         let mut i = NameInterner::new();
         let r = i.intern("");
         assert_eq!(i.get(r), "");
+    }
+
+    #[test]
+    fn releasing_index_keeps_names_readable() {
+        let mut i = NameInterner::new();
+        let r = i.intern("node_modules");
+
+        let dead = i.release_index();
+
+        assert_eq!(dead.len(), 1);
+        assert!(i.map.is_empty());
+        assert_eq!(i.get(r), "node_modules");
     }
 }

@@ -56,9 +56,13 @@ fn overlay_for(
     filter: Option<&str>,
     hide_system: bool,
 ) -> Option<Arc<FilterOverlay>> {
-    let text = filter?.trim();
+    let Some(text) = filter.map(str::trim).filter(|text| !text.is_empty()) else {
+        *session.filter.lock().unwrap() = None;
+        return None;
+    };
     let query = SearchQuery::parse(text);
     if query.is_empty() {
+        *session.filter.lock().unwrap() = None;
         return None;
     }
     let mut cache = session.filter.lock().unwrap();
@@ -815,6 +819,9 @@ fn drain(app: AppHandle, session: Arc<Session>) {
                 p.bytes = pr.bytes;
             }
             ScanEvent::Done(stats) => {
+                // Bound (not dropped) so the ~100ms deallocation happens at
+                // scope exit, after the Done emit and outside the write lock.
+                let _dead_name_index = session.builder.write().unwrap().release_name_index();
                 {
                     let mut p = session.progress.lock().unwrap();
                     p.files = stats.files;
@@ -843,6 +850,7 @@ fn drain(app: AppHandle, session: Arc<Session>) {
     }
 
     // Done is mandatory; EOF means the worker died without reporting it.
+    let _dead_name_index = session.builder.write().unwrap().release_name_index();
     {
         let mut p = session.progress.lock().unwrap();
         p.errors += 1;

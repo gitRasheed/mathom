@@ -285,6 +285,11 @@ impl TreeBuilder {
         }
     }
 
+    /// Detaches the insertion-only lookup while keeping names readable.
+    pub fn release_name_index(&mut self) -> impl Send + use<> {
+        self.tree.names.release_index()
+    }
+
     pub fn remove(&mut self, id: NodeId) -> Option<Removed> {
         self.tree.remove_subtree(id)
     }
