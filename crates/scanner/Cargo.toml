@@ -1,12 +1,12 @@
 [package]
 name = "mathom-scanner"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 
 [dependencies]
 crossbeam-channel = "0.5.15"
-mathom-core = { version = "0.1.0", path = "../core" }
+mathom-core = { version = "0.2.0", path = "../core" }
 rayon = "1.12.0"
 
 # For GetCompressedFileSizeW (true allocation of sparse/compressed/

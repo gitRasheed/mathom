@@ -1,6 +1,6 @@
 [package]
 name = "mathom-app"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 
@@ -11,9 +11,9 @@ default = ["mft-backend"]
 mft-backend = ["mathom-scanner-ntfs/mft-backend"]
 
 [dependencies]
-mathom-core = { version = "0.1.0", path = "../crates/core" }
-mathom-scanner = { version = "0.1.0", path = "../crates/scanner" }
-mathom-scanner-ntfs = { version = "0.1.0", path = "../crates/scanner-ntfs" }
+mathom-core = { version = "0.2.0", path = "../crates/core" }
+mathom-scanner = { version = "0.2.0", path = "../crates/scanner" }
+mathom-scanner-ntfs = { version = "0.2.0", path = "../crates/scanner-ntfs" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 tauri = { version = "2.11.5", features = [] }
