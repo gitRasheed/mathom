@@ -83,7 +83,7 @@ body {
    mirrors the state onto <html data-maximized>. */
 #root {
   background: var(--color-app);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -102,6 +102,12 @@ textarea {
 
 input[type="checkbox"] {
   cursor: pointer;
+}
+
+/* Scrollbars follow the theme tokens instead of Chromium's default gray. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-raised) transparent;
 }
 
 .tnum {

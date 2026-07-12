@@ -10,6 +10,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(scan::AppState::default())
+        .setup(|app| {
+            size_to_monitor(app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             scan::start_scan,
             scan::cancel_scan,
@@ -32,4 +36,22 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running mathom");
+}
+
+/// Open at 75% of the monitor, centered — one fixed size reads wrong on
+/// laptops and 4K displays alike. Min sizes from the config still apply.
+fn size_to_monitor(app: &tauri::App) {
+    use tauri::Manager;
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(Some(mon)) = win.current_monitor() else {
+        return;
+    };
+    let size = mon.size();
+    let _ = win.set_size(tauri::PhysicalSize::new(
+        size.width * 3 / 4,
+        size.height * 3 / 4,
+    ));
+    let _ = win.center();
 }
