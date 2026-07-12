@@ -55,7 +55,7 @@ export function ScanMenu({ onScan }: ScanMenuProps) {
         className="flex h-8 items-center gap-1.5 rounded-md bg-accent px-4 text-[13px] font-medium text-white hover:bg-accent-hover"
       >
         Scan
-        <ChevronIcon className="rotate-90" />
+        <ChevronIcon className="relative top-px rotate-90" />
       </button>
       {open && (
         <div className="absolute top-9 left-0 z-50 w-80 rounded-md border border-edge-strong bg-panel py-1 shadow-xl">

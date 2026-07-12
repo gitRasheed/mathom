@@ -177,7 +177,7 @@ export function SearchBox({
           "Space-separated filters, all must match:\nname substring · ext:mp4 · >100mb" +
           (canFilter ? "\nEnter filters every view; Esc clears" : "")
         }
-        className={`h-8 w-56 rounded-md border bg-panel px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-5 focus:border-accent-edge disabled:opacity-40 ${
+        className={`h-8 w-96 rounded-md border bg-panel px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-5 focus:border-accent-edge disabled:opacity-40 ${
           activeFilter ? "border-accent pr-7" : "border-edge"
         }`}
       />

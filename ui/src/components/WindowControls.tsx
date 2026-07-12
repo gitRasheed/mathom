@@ -10,7 +10,11 @@ export function WindowControls() {
   useEffect(() => {
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
-    const sync = () => void win.isMaximized().then(setMaximized);
+    const sync = () =>
+      void win.isMaximized().then((v) => {
+        setMaximized(v);
+        document.documentElement.toggleAttribute("data-maximized", v);
+      });
     sync();
     void win.onResized(sync).then((u) => (unlisten = u));
     return () => unlisten?.();

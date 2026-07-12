@@ -66,7 +66,10 @@ export function Toolbar({
       {startError && (
         <span className="text-xs text-danger-ink">{startError}</span>
       )}
-      <div className="ml-auto shrink-0">
+      {/* Spacers carry the drag region — a plain div would swallow the
+          mousedown that should drag the window. */}
+      <div data-tauri-drag-region className="min-w-4 flex-1" />
+      <div className="shrink-0">
         <SearchBox
           generation={generation}
           hideSystem={hideSystem}
@@ -76,6 +79,7 @@ export function Toolbar({
           onApplyFilter={onApplyFilter}
         />
       </div>
+      <div data-tauri-drag-region className="min-w-4 flex-1" />
       <button
         onClick={onToggleTypePanel}
         title="Show or hide the file-types panel"

@@ -70,12 +70,25 @@ body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   font-size: 13px;
-  background: var(--color-app);
+  background: transparent;
   color: var(--color-ink-2);
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
   overflow: hidden;
+}
+
+/* Undecorated transparent window: the app rounds its own corners (Win10
+   has no DWM rounding). Maximized windows must be square — WindowControls
+   mirrors the state onto <html data-maximized>. */
+#root {
+  background: var(--color-app);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+:root[data-maximized] #root {
+  border-radius: 0;
 }
 
 /* Body disables selection for an app feel; text inputs must keep it.
