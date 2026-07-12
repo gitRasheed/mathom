@@ -12,9 +12,9 @@ crates build on Linux and macOS by design, there just is no UI for them yet.
 ## Why another one
 
 On NTFS volumes mathom reads the Master File Table directly instead of
-walking folders. A 2-million-file system drive maps in about 3 seconds,
-where the folder walk takes over 30. Results stream in while the scan runs,
-so the tree and treemap fill in live instead of appearing at the end.
+walking folders, and scans faster than WizTree in local tests. Results
+stream in while the scan runs, so the tree and treemap fill in live
+instead of appearing at the end.
 
 It also tries hard to report sizes truthfully: logical vs. allocated size,
 NTFS compression, sparse files, hardlinks counted once, and OneDrive
