@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mathom — fast, free, open-source disk space analyzer for Windows</title>
-  <meta name="description" content="See what's eating your disk space. mathom reads NTFS drives straight from the Master File Table — millions of files mapped in seconds as a live treemap. A free, open-source alternative to WinDirStat, WizTree, and TreeSize. MIT licensed, no telemetry." />
+  <meta name="description" content="See what's eating your disk space. mathom reads NTFS drives straight from the Master File Table and maps millions of files in seconds as a live treemap. A free, open-source alternative to WinDirStat, WizTree, and TreeSize. MIT licensed, no telemetry." />
   <link rel="canonical" href="https://gitrasheed.github.io/mathom/" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <meta property="og:type" content="website" />
@@ -47,6 +47,7 @@
     }
     a { color: var(--accent-ink); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.92em; }
     .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 
     header.site { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
@@ -84,6 +85,7 @@
       color: var(--ink); margin: 0 0 10px;
     }
     section p.lead { color: var(--ink3); max-width: 62ch; margin: 0 0 28px; }
+    section p.lead b { color: var(--ink2); }
 
     /* ---- the demo window ---- */
     .demo-window {
@@ -98,26 +100,31 @@
     .demo-toolbar .scanbtn {
       background: var(--accent); border: none; color: #fff; font-weight: 600;
       font-size: 13px; padding: 6px 14px; border-radius: 6px; cursor: pointer;
-      font-family: inherit;
+      font-family: inherit; white-space: nowrap;
     }
     .demo-toolbar .scanbtn:hover { background: var(--accent-hover); }
-    .demo-toolbar .searchbox {
+    .demo-toolbar input.searchbox {
       flex: 1; max-width: 380px; margin: 0 auto; background: var(--panel);
       border: 1px solid var(--edge); border-radius: 6px; padding: 6px 12px;
-      color: var(--ink5); font-size: 12.5px; white-space: nowrap; overflow: hidden;
+      color: var(--ink2); font-size: 12.5px; font-family: inherit; outline: none;
+      user-select: text; -webkit-user-select: text; min-width: 0;
     }
+    .demo-toolbar input.searchbox:focus { border-color: var(--edge-strong); }
+    .demo-toolbar input.searchbox::placeholder { color: var(--ink5); }
     .demo-toolbar .winbtns { display: flex; gap: 14px; color: var(--ink4); font-size: 12px; padding-right: 4px; }
-    .demo-body { display: grid; grid-template-columns: 224px 1fr 190px; height: 460px; }
-    .demo-tree { border-right: 1px solid var(--edge); overflow: hidden; padding: 6px 0; font-size: 12.5px; }
+    .demo-body { display: grid; grid-template-columns: 236px 1fr 190px; height: 460px; }
+    .demo-tree { border-right: 1px solid var(--edge); overflow-y: auto; overflow-x: hidden; padding: 6px 0; font-size: 12.5px; }
     .demo-tree .row {
-      display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 10px;
-      color: var(--ink2); cursor: pointer; align-items: center; line-height: 1.5;
+      display: flex; align-items: center; gap: 4px; padding: 2.5px 10px 2.5px 6px;
+      color: var(--ink2); cursor: pointer; line-height: 1.5; white-space: nowrap;
     }
     .demo-tree .row:hover { background: var(--hush); }
-    .demo-tree .row .sz { color: var(--ink4); font-variant-numeric: tabular-nums; font-size: 11.5px; }
-    .demo-tree .row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .demo-tree .bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--raised); overflow: hidden; margin: 0 0 2px; }
-    .demo-tree .bar i { display: block; height: 100%; background: var(--accent); width: 0%; }
+    .demo-tree .row.active { background: var(--raised); color: var(--ink); }
+    .demo-tree .row.more { color: var(--ink5); cursor: default; font-size: 11px; }
+    .demo-tree .row.more:hover { background: transparent; }
+    .demo-tree .chev { width: 14px; flex: none; color: var(--ink4); font-size: 10px; text-align: center; }
+    .demo-tree .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .demo-tree .sz { color: var(--ink4); font-variant-numeric: tabular-nums; font-size: 11.5px; flex: none; }
     .demo-main { position: relative; min-width: 0; }
     .demo-crumbs { position: absolute; top: 0; left: 0; right: 0; padding: 6px 10px; font-size: 12px; color: var(--ink3); z-index: 2; display: flex; gap: 4px; }
     .demo-crumbs span { cursor: pointer; }
@@ -158,10 +165,9 @@
       background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
       padding: 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: center;
     }
-    .install code {
-      font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 13.5px;
+    .install .box code {
       background: var(--app); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 12px;
-      color: var(--ink3); display: inline-block;
+      color: var(--ink3); display: inline-block; font-size: 13.5px;
     }
     .install .alt { font-size: 13.5px; color: var(--ink4); }
 
@@ -170,11 +176,10 @@
     footer .links a { color: var(--ink3); }
     footer .name-story { max-width: 60ch; }
 
-    @media (max-width: 960px) { .demo-types { display: none; } .demo-body { grid-template-columns: 200px 1fr; } }
+    @media (max-width: 960px) { .demo-types { display: none; } .demo-body { grid-template-columns: 210px 1fr; } }
     @media (max-width: 700px) {
       .demo-tree { display: none; } .demo-body { grid-template-columns: 1fr; height: 400px; }
       .grid3 { grid-template-columns: 1fr; gap: 24px; }
-      .demo-toolbar .searchbox { display: none; }
     }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   </style>
@@ -194,27 +199,29 @@
       <h1>See where the space went<em>.</em></h1>
       <p class="sub">
         mathom is a <strong>free, open-source disk space analyzer for Windows</strong>.
-        It reads NTFS drives straight from the Master File Table — a couple of million
-        files map in seconds, live, as a zoomable treemap.
+        It reads the drive's Master File Table directly, so a couple million files map
+        in a few seconds, and results stream in live while the scan runs.
       </p>
       <div class="cta">
         <a class="btn primary" id="dl" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
         <a class="btn ghost" href="#demo">Try the UI below</a>
       </div>
-      <p class="fineprint"><b>MIT licensed</b> · free at home and at work · no telemetry, ever <span id="dl-meta"></span></p>
+      <p class="fineprint"><b>MIT licensed</b> · free for personal and commercial use · no telemetry <span id="dl-meta"></span></p>
     </section>
 
     <section id="demo">
-      <h2>This is the interface. Try it.</h2>
+      <h2>Try it</h2>
       <p class="lead">
-        mathom's UI is web-native, so this page can run it. Example data, scripted scan,
-        real interface: press <b>Scan</b>, hover the map, click a folder to drill in,
-        climb back out with the breadcrumb.
+        The window below is the real interface running on made-up files. Hover the map,
+        click a folder to go deeper, and come back up with the tree or the breadcrumb.
+        The search box understands the app's filter grammar, so <b>&gt;500mb</b> and
+        <b>ext:mp4</b> both work. Press <b>Rescan</b> to watch how a live scan streams in.
       </p>
       <div class="demo-window" aria-label="Interactive demo of the mathom interface">
         <div class="demo-toolbar">
-          <button class="scanbtn" id="scan">Scan ▾</button>
-          <div class="searchbox">Try &gt;500mb — filter by size</div>
+          <button class="scanbtn" id="scan">Rescan ▾</button>
+          <input class="searchbox" id="q" type="text" spellcheck="false"
+                 placeholder="Search: try >500mb or ext:mp4, Enter to apply, Esc to clear" />
           <div class="winbtns" aria-hidden="true"><span>—</span><span>▢</span><span>✕</span></div>
         </div>
         <div class="demo-body">
@@ -225,11 +232,11 @@
           </div>
           <div class="demo-types" id="types"><h3>FILE TYPES</h3></div>
         </div>
-        <div class="demo-status"><span id="st-left">Ready — press Scan</span><span id="st-right">0 nodes</span></div>
+        <div class="demo-status"><span id="st-left"></span><span id="st-right"></span></div>
       </div>
       <p class="demo-caption">
-        Scripted demo with example data. The real app does exactly this to an actual
-        2,000,000-file drive — streaming in live at millions of files per second.
+        The files are fake. The treemap math is not: it's the same squarified layout
+        the app computes in Rust, ported line for line.
       </p>
     </section>
 
@@ -237,36 +244,37 @@
       <div class="grid3">
         <div>
           <h3>MFT-fast</h3>
-          <p>On NTFS, mathom skips folder walking and reads the <b>Master File Table</b>
-          directly — 2 million files in about 2.4 seconds on an ordinary NVMe laptop.
-          No admin rights? It falls back to a fast parallel walker, automatically.</p>
+          <p>On NTFS drives mathom reads the <b>Master File Table</b> instead of walking
+          folders: about 2.4 seconds for 2 million files on an ordinary NVMe laptop.
+          Without admin rights it quietly falls back to a parallel folder walker.</p>
         </div>
         <div>
           <h3>Live from the first batch</h3>
-          <p>Results <b>stream in while the scan runs</b> — the tree and treemap grow in
-          front of you instead of appearing after a progress bar. You're exploring
-          before it finishes.</p>
+          <p>The tree and treemap <b>fill in while the scan runs</b>, so you can start
+          poking around before it finishes. There is no progress bar to stare at.</p>
         </div>
         <div>
           <h3>Honest sizes, safe deletes</h3>
-          <p>Logical vs. allocated size, NTFS compression, sparse files, hardlinks
-          counted once, OneDrive placeholders reported truthfully. Deletes go to the
-          <b>Recycle Bin</b>, and Windows-critical folders are refused outright.</p>
+          <p>Logical and allocated size, NTFS compression, sparse files, hardlinks
+          counted once, and OneDrive placeholders that claim gigabytes while occupying
+          almost nothing. Deletes go to the <b>Recycle Bin</b>, and mathom refuses to
+          touch Windows-critical folders at all.</p>
         </div>
       </div>
     </section>
 
     <section class="compare">
       <h2>An alternative to WinDirStat, WizTree, and TreeSize</h2>
-      <p>Coming from <b>WinDirStat</b>? Same job, same treemap idea — but scans finish
-      in seconds instead of minutes, and the interface was designed this decade.</p>
-      <p>Coming from <b>WizTree</b>? mathom uses the same MFT-reading technique at
-      comparable speed — faster on our test machine — and it's <b>open source</b>:
-      MIT licensed, free for commercial use, no nag screens, and you can read every
+      <p><b>WinDirStat</b> does the same job and popularized the treemap, but its scans
+      take minutes where mathom takes seconds, and its interface has not changed much
+      since 2007.</p>
+      <p><b>WizTree</b> reads the MFT the same way and is about as fast (mathom measured
+      slightly faster on our test machine), but it is closed source and paid for
+      business use. mathom is MIT licensed: free everywhere, and you can read every
       line of the scanner.</p>
-      <p>Evaluating <b>TreeSize</b> or missing <b>DaisyDisk</b> from your Mac?
-      mathom is free for work machines by license, not by loophole — and it takes the
-      visual side as seriously as the scan speed.</p>
+      <p><b>TreeSize</b> is paid for commercial use, and <b>DaisyDisk</b> stayed on the
+      Mac. If you want that class of interface on Windows without a license to track,
+      this is the niche mathom was built for.</p>
     </section>
 
     <section class="install" id="get">
@@ -274,14 +282,14 @@
       <div class="box">
         <a class="btn primary" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
         <div class="alt">
-          MSI installer, setup.exe, or portable zip — from
+          MSI installer, setup.exe, or portable zip from
           <a href="https://github.com/gitRasheed/mathom/releases">GitHub Releases</a>.<br />
-          The binaries are unsigned while in alpha, so SmartScreen will ask once:
-          “More info” → “Run anyway”.
+          The binaries are unsigned while in alpha, so SmartScreen will warn on first
+          run. Click "More info", then "Run anyway".
         </div>
       </div>
       <p class="fineprint" style="margin-top:14px">
-        Coming soon: <code style="padding:2px 8px">winget install gitRasheed.mathom</code>
+        Coming soon: <code style="padding:2px 8px">winget install mathom</code>
         · or <a href="https://github.com/gitRasheed/mathom#build-from-source">build from source</a>
       </p>
     </section>
@@ -310,7 +318,7 @@
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   const GB = 1024 ** 3, MB = 1024 ** 2, KB = 1024;
-  const CAT = { // category → tile color (the app's palette.ts)
+  const CAT = { // category tile colors, from the app's palette.ts
     video: "#a855f7", audio: "#22c55e", image: "#eab308", archive: "#f97316",
     doc: "#3b82f6", code: "#06b6d4", exe: "#ec4899", system: "#64748b",
     data: "#84cc16", other: "#71717a",
@@ -323,15 +331,10 @@
     sys: "system", manifest: "system", mui: "system", pak: "data", bin: "data",
     dat: "data", vhdx: "data", blend: "data",
   };
-  const catOf = (name, isDir) => {
-    if (isDir) return null;
-    const i = name.lastIndexOf(".");
-    return CAT[EXT_CAT[i < 0 ? "" : name.slice(i + 1).toLowerCase()] || "other"];
-  };
+  const extOf = (name) => { const i = name.lastIndexOf("."); return i < 0 ? "" : name.slice(i + 1).toLowerCase(); };
   function dir(name, children) { return { name, children }; }
   function file(name, size) { return { name, size }; }
-  // A swarm of small files: what the app's plate grain exists for.
-  function swarm(n, lo, hi, namer) {
+  function swarm(n, lo, hi, namer) { // many small files: what the plate grain is for
     const out = [];
     for (let i = 0; i < n; i++) out.push(file(namer(i), lo + rnd() * (hi - lo)));
     return out;
@@ -395,7 +398,6 @@
     file("hiberfil.sys", 6.3 * GB),
   ]);
 
-  // Resolve sizes, parents, paths, reveal order.
   const leaves = [];
   (function prep(node, parent, path) {
     node.parent = parent; node.path = path + node.name;
@@ -404,24 +406,61 @@
       for (const c of node.children) { prep(c, node, node.path + "\\"); node.size += c.size; }
       node.children.sort((a, b) => b.size - a.size);
     } else {
-      node.cat = catOf(node.name, false);
+      node.cat = CAT[EXT_CAT[extOf(node.name)] || "other"];
       leaves.push(node);
     }
   })(ROOT, null, "");
   for (let i = leaves.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [leaves[i], leaves[j]] = [leaves[j], leaves[i]]; }
   leaves.forEach((f, i) => { f.at = (i + 1) / leaves.length; });
 
+  // ---------- state ----------
+  let view = ROOT, reveal = 1, scanning = false, filter = null, rawQuery = "";
+  let rects = [], hovered = null, grainPat = null;
+  const expanded = new Set([ROOT.path, ROOT.path + "\\Users"]);
+
+  // ---------- search filter (the app's grammar, minus the corners) ----------
+  function parseQuery(text) {
+    const q = { min: 0, exts: [], terms: [] };
+    for (const tok of text.trim().split(/\s+/)) {
+      if (!tok) continue;
+      let m;
+      if (tok.startsWith("ext:")) {
+        q.exts = tok.slice(4).split(",").map((e) => e.replace(/^\./, "").toLowerCase()).filter(Boolean);
+      } else if ((m = tok.match(/^>=?([\d.]+)(b|kb|mb|gb|tb)?$/i))) {
+        const mult = { b: 1, kb: KB, mb: MB, gb: GB, tb: 1024 * GB }[(m[2] || "b").toLowerCase()];
+        q.min = parseFloat(m[1]) * mult;
+      } else {
+        q.terms.push(tok.toLowerCase());
+      }
+    }
+    return q.min || q.exts.length || q.terms.length ? q : null;
+  }
+  const matchFile = (n) =>
+    n.size >= filter.min &&
+    (!filter.exts.length || filter.exts.includes(extOf(n.name))) &&
+    filter.terms.every((t) => n.name.toLowerCase().includes(t));
+  const matchDirName = (n) =>
+    !filter.exts.length && !filter.min && filter.terms.length &&
+    filter.terms.every((t) => n.name.toLowerCase().includes(t));
+
+  /** Bytes a node contributes to the current view: reveal + filter aware. */
+  function bytesOf(n, inherited) {
+    if (!n.children) {
+      if (n.at > reveal) return 0;
+      return !filter || inherited || matchFile(n) ? n.size : 0;
+    }
+    const inh = inherited || (filter && matchDirName(n));
+    let s = 0;
+    for (const c of n.children) s += bytesOf(c, inh);
+    return s;
+  }
+
   // ---------- squarified layout (ported from mathom-core's treemap.rs) ----------
-  function layout(root, W, H, reveal) {
-    const rects = [];
-    const eff = (n) => {
-      if (!n.children) return n.at <= reveal ? n.size : 0;
-      let s = 0; for (const c of n.children) s += eff(c);
-      return s;
-    };
+  function layout(root, W, H) {
+    const out = [];
     function children(node, x, y, w, h, depth) {
       if (depth > 3 || w < 4 || h < 4) return;
-      const items = node.children.map((c) => [c, eff(c)]).filter((e) => e[1] > 0);
+      const items = node.children.map((c) => [c, bytesOf(c, false)]).filter((e) => e[1] > 0);
       if (!items.length) return;
       items.sort((a, b) => b[1] - a[1]);
       const total = items.reduce((s, e) => s + e[1], 0);
@@ -449,7 +488,7 @@
           off += L;
           if (cw * ch >= 1) {
             const c = items[k][0];
-            rects.push({ n: c, x: cx, y: cy, w: cw, h: ch, d: depth });
+            out.push({ n: c, x: cx, y: cy, w: cw, h: ch, d: depth });
             if (c.children && cw > 2 && ch > 2) children(c, cx + 1, cy + 1, cw - 2, ch - 2, depth + 1);
           }
         }
@@ -457,15 +496,14 @@
         i = j;
       }
     }
-    rects.push({ n: root, x: 0, y: 0, w: W, h: H, d: 0 });
+    out.push({ n: root, x: 0, y: 0, w: W, h: H, d: 0 });
     children(root, 1, 1, W - 2, H - 2, 1);
-    return rects;
+    return out;
   }
 
   // ---------- rendering ----------
   const canvas = document.getElementById("map"), ctx = canvas.getContext("2d");
   const tip = document.getElementById("tip");
-  let view = ROOT, reveal = 0, rects = [], hovered = null, grainPat = null, dpr = 1;
   function grain() {
     if (grainPat) return grainPat;
     const t = document.createElement("canvas"); t.width = t.height = 4;
@@ -476,18 +514,18 @@
   }
   function draw() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
-    dpr = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1;
     if (canvas.width !== (w * dpr) | 0) { canvas.width = w * dpr; canvas.height = h * dpr; }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0f1115"; ctx.fillRect(0, 0, w, h);
-    rects = reveal > 0 ? layout(view, w, h, reveal) : [];
+    rects = reveal > 0 ? layout(view, w, h) : [];
     for (const r of rects) {
-      if (r.n.children) { ctx.fillStyle = r.d === 0 ? "#0f1115" : grain(); }
+      if (r.n.children) ctx.fillStyle = r.d === 0 ? "#0f1115" : grain();
       else ctx.fillStyle = r.n.cat;
       const x = Math.round(r.x), y = Math.round(r.y);
       const rw = Math.max(1, Math.round(r.x + r.w) - x - 1), rh = Math.max(1, Math.round(r.y + r.h) - y - 1);
       ctx.fillRect(x, y, rw, rh);
-      if (!r.n.children && rw > 3 && rh > 3) { // soft top-light, like the app's sprite
+      if (!r.n.children && rw > 3 && rh > 3) { // soft top light, like the app's sprite
         const gr = ctx.createLinearGradient(x, y, x, y + rh);
         gr.addColorStop(0, "rgba(255,255,255,0.18)"); gr.addColorStop(0.5, "rgba(255,255,255,0)");
         gr.addColorStop(1, "rgba(0,0,0,0.18)");
@@ -500,30 +538,43 @@
     }
   }
 
-  // ---------- side panes + status ----------
+  // ---------- panes ----------
   const fmt = (b) => b >= GB ? (b / GB).toFixed(b >= 10 * GB ? 0 : 1) + " GB"
     : b >= MB ? (b / MB).toFixed(0) + " MB" : (b / KB).toFixed(0) + " KB";
-  const effSize = (n) => { // revealed size, for live panes
-    if (!n.children) return n.at <= reveal ? n.size : 0;
-    let s = 0; for (const c of n.children) s += effSize(c); return s;
-  };
-  function renderPanes() {
-    const treeEl = document.getElementById("tree");
-    const total = effSize(view) || 1;
+
+  function renderTree() {
     let html = "";
-    for (const c of view.children.slice(0, 12)) {
-      const s = effSize(c); if (!s) continue;
-      html += `<div class="row" data-p="${c.path}"><span class="nm">${c.children ? "▸ " : ""}${c.name}</span>` +
-        `<span class="sz">${fmt(s)}</span><span class="bar"><i style="width:${(100 * s / total).toFixed(1)}%"></i></span></div>`;
-    }
-    treeEl.innerHTML = html;
+    (function walk(n, depth) {
+      const b = bytesOf(n, false);
+      if (!b && n !== ROOT) return;
+      const isDir = !!n.children, open = expanded.has(n.path);
+      html += `<div class="row${n === view ? " active" : ""}" data-p="${n.path}" style="padding-left:${6 + depth * 13}px">` +
+        `<span class="chev" data-t="1">${isDir ? (open ? "▾" : "▸") : ""}</span>` +
+        `<span class="nm">${n.name}</span><span class="sz">${fmt(b)}</span></div>`;
+      if (isDir && open) {
+        const kids = n.children.filter((c) => bytesOf(c, false) > 0);
+        for (const c of kids.slice(0, 9)) walk(c, depth + 1);
+        if (kids.length > 9)
+          html += `<div class="row more" style="padding-left:${6 + (depth + 1) * 13 + 14}px">${kids.length - 9} more, sized on the map</div>`;
+      }
+    })(ROOT, 0);
+    document.getElementById("tree").innerHTML = html;
+  }
+
+  function renderSide() {
     const types = {};
-    (function walk(n) {
-      if (!n.children) { if (n.at <= reveal) { const i = n.name.lastIndexOf(".");
-        const ext = i < 0 ? "(no ext)" : n.name.slice(i); const t = types[ext] || (types[ext] = { s: 0, c: n.cat });
-        t.s += n.size; } return; }
-      n.children.forEach(walk);
-    })(view);
+    (function walk(n, inherited) {
+      if (!n.children) {
+        if (n.at <= reveal && (!filter || inherited || matchFile(n))) {
+          const ext = n.name.includes(".") ? n.name.slice(n.name.lastIndexOf(".")) : "(no ext)";
+          const t = types[ext] || (types[ext] = { s: 0, c: n.cat });
+          t.s += n.size;
+        }
+        return;
+      }
+      const inh = inherited || (filter && matchDirName(n));
+      n.children.forEach((c) => walk(c, inh));
+    })(view, false);
     const top = Object.entries(types).sort((a, b) => b[1].s - a[1].s).slice(0, 14);
     document.getElementById("types").innerHTML = "<h3>FILE TYPES</h3>" +
       top.map(([e, t]) => `<div class="t"><span class="dot" style="background:${t.c}"></span><span class="ext">${e}</span><span class="sz">${fmt(t.s)}</span></div>`).join("");
@@ -532,29 +583,37 @@
       crumbs.map((n, i) => `<span data-p="${n.path}">${n.name}${i < crumbs.length - 1 ? " ›" : ""}</span>`).join(" ");
   }
 
-  // ---------- the scripted scan ----------
   const DUR = 2400, FILES = 1284022;
-  let scanning = false, done = false;
   const stL = document.getElementById("st-left"), stR = document.getElementById("st-right");
+  function renderStatus() {
+    if (scanning) return; // the scan loop owns the status line while running
+    if (filter) {
+      stL.textContent = `Filter "${rawQuery}": ${fmt(bytesOf(ROOT, false))} of ${fmt(ROOT.size)} matches`;
+    } else {
+      stL.textContent = `Scan complete in 2.4s · ${FILES.toLocaleString()} files · ${fmt(ROOT.size)}`;
+    }
+    stR.textContent = `${FILES.toLocaleString()} nodes`;
+  }
+  function refresh() { draw(); renderTree(); renderSide(); renderStatus(); }
+
+  // ---------- the scripted rescan ----------
   function scan() {
     if (scanning) return;
-    scanning = true; done = false; view = ROOT; reveal = 0;
+    scanning = true; view = ROOT; reveal = 0;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const t0 = performance.now();
     function frame(t) {
       const p = reduce ? 1 : Math.min(1, (t - t0) / DUR);
-      reveal = 1 - Math.pow(1 - p, 1.8); // fast start, settling end — like a real scan
-      draw(); renderPanes();
+      reveal = 1 - Math.pow(1 - p, 1.8); // fast start, settling end, like a real scan
+      draw(); renderTree(); renderSide();
       const files = Math.round(FILES * reveal);
       if (p < 1) {
-        stL.textContent = `Scanning C:\\ — ${files.toLocaleString()} files · ${fmt(effSize(ROOT))} · ${Math.round(FILES / (DUR / 1000)).toLocaleString()} files/s`;
+        stL.textContent = `Scanning C:\\ · ${files.toLocaleString()} files · ${fmt(bytesOf(ROOT, false))} · ${Math.round(FILES / (DUR / 1000)).toLocaleString()} files/s`;
         stR.textContent = `${files.toLocaleString()} nodes`;
         requestAnimationFrame(frame);
       } else {
-        scanning = false; done = true; reveal = 1; draw(); renderPanes();
-        stL.textContent = `Scan complete in 2.4s · ${FILES.toLocaleString()} files · ${fmt(ROOT.size)}`;
-        stR.textContent = `${FILES.toLocaleString()} nodes`;
-        document.getElementById("scan").textContent = "Rescan ▾";
+        scanning = false; reveal = 1;
+        refresh();
       }
     }
     requestAnimationFrame(frame);
@@ -563,6 +622,12 @@
 
   // ---------- interactions ----------
   const byPath = (p) => { let f = null; (function w(n) { if (n.path === p) f = n; else if (n.children) n.children.forEach(w); })(ROOT); return f; };
+  function setView(n) {
+    view = n;
+    for (let a = n; a; a = a.parent) expanded.add(a.path); // keep the tree rooted
+    hovered = null; tip.style.display = "none";
+    refresh();
+  }
   canvas.addEventListener("mousemove", (e) => {
     const b = canvas.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
     hovered = null;
@@ -571,10 +636,10 @@
       if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { hovered = r; break; }
     }
     if (hovered && hovered.n !== view) {
-      const n = hovered.n, parent = effSize(n.parent) || 1;
+      const n = hovered.n, parent = bytesOf(n.parent, false) || 1;
       tip.style.display = "block";
       tip.querySelector(".n").textContent = n.name;
-      tip.querySelector(".d").textContent = `${fmt(effSize(n))} · ${(100 * effSize(n) / parent).toFixed(1)}% of ${n.parent.name}`;
+      tip.querySelector(".d").textContent = `${fmt(bytesOf(n, false))} · ${(100 * bytesOf(n, false) / parent).toFixed(1)}% of ${n.parent.name}`;
       tip.querySelector(".p").textContent = n.path;
       const tw = tip.offsetWidth, th = tip.offsetHeight;
       tip.style.left = Math.min(e.clientX + 14, innerWidth - tw - 8) + "px";
@@ -584,18 +649,35 @@
   });
   canvas.addEventListener("mouseleave", () => { hovered = null; tip.style.display = "none"; draw(); });
   canvas.addEventListener("click", () => {
-    if (hovered && hovered.n.children && hovered.n !== view) { view = hovered.n; hovered = null; tip.style.display = "none"; draw(); renderPanes(); }
+    if (hovered && hovered.n.children && hovered.n !== view) setView(hovered.n);
   });
   document.getElementById("crumbs").addEventListener("click", (e) => {
     const p = e.target.dataset && e.target.dataset.p;
-    if (p) { const n = byPath(p); if (n && n.children) { view = n; draw(); renderPanes(); } }
+    if (p) { const n = byPath(p); if (n && n.children) setView(n); }
   });
   document.getElementById("tree").addEventListener("click", (e) => {
-    const row = e.target.closest(".row"); if (!row) return;
-    const n = byPath(row.dataset.p); if (n && n.children) { view = n; draw(); renderPanes(); }
+    const row = e.target.closest(".row");
+    if (!row || !row.dataset.p) return;
+    const n = byPath(row.dataset.p);
+    if (!n) return;
+    if (e.target.dataset.t && n.children) { // chevron: expand or collapse in place
+      expanded.has(n.path) ? expanded.delete(n.path) : expanded.add(n.path);
+      renderTree();
+    } else if (n.children) setView(n);
   });
-  addEventListener("resize", () => { if (reveal > 0) { draw(); } });
-  draw(); renderPanes();
+  const q = document.getElementById("q");
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      rawQuery = q.value.trim();
+      filter = rawQuery ? parseQuery(rawQuery) : null;
+      if (view !== ROOT && filter) setView(ROOT); else refresh();
+    } else if (e.key === "Escape") {
+      q.value = ""; rawQuery = ""; filter = null; refresh(); q.blur();
+    }
+  });
+  addEventListener("resize", () => draw());
+
+  refresh(); // the page opens on a finished scan; Rescan replays the stream
 
   // ---------- latest-release link ----------
   fetch("https://api.github.com/repos/gitRasheed/mathom/releases/latest")
