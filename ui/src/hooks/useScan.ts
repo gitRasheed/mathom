@@ -48,7 +48,7 @@ export function useScan(): ScanController {
   const [childrenMap, setChildrenMap] = useState<Map<number, Row[]>>(new Map());
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
   const [sort, setSort] = useState<Sort>({ key: "size", desc: true });
-  const [hideSystem, setHideSystem] = useState(false);
+  const [hideSystem, setHideSystem] = useState(true);
   const [filter, setFilterState] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
