@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>mathom — fast, free, open-source disk space analyzer for Windows</title>
+  <title>mathom: free open-source disk space analyzer for Windows</title>
   <meta name="description" content="See what's eating your disk space. mathom reads NTFS drives straight from the Master File Table and maps millions of files in seconds as a live treemap. A free, open-source alternative to WinDirStat, WizTree, and TreeSize. MIT licensed, no telemetry." />
   <link rel="canonical" href="https://gitrasheed.github.io/mathom/" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="mathom — fast, free, open-source disk analyzer for Windows" />
+  <meta property="og:title" content="mathom: free open-source disk analyzer for Windows" />
   <meta property="og:description" content="Scans millions of files in seconds by reading the MFT directly. Live treemap, honest sizes, safe deletes. Free for personal and commercial use." />
   <meta property="og:url" content="https://gitrasheed.github.io/mathom/" />
   <meta property="og:image" content="https://gitrasheed.github.io/mathom/screenshot.png" />
@@ -62,9 +62,7 @@
       font-size: clamp(38px, 6.5vw, 62px); font-weight: 700; letter-spacing: -0.02em;
       line-height: 1.06; color: var(--ink); margin: 0 0 20px; max-width: 15ch;
     }
-    .hero h1 em { font-style: normal; color: var(--accent-ink); }
     .hero p.sub { font-size: 19px; color: var(--ink3); max-width: 56ch; margin: 0 0 32px; }
-    .hero p.sub strong { color: var(--ink2); font-weight: 600; }
     .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
     .btn {
       display: inline-block; padding: 11px 22px; border-radius: 8px; font-size: 15px;
@@ -153,13 +151,7 @@
     #tip .d { color: var(--ink3); }
     #tip .p { color: var(--ink5); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
-    .grid3 h3 { font-size: 11.5px; font-weight: 600; letter-spacing: 0.09em; color: var(--accent-ink); margin: 0 0 10px; text-transform: uppercase; }
-    .grid3 p { margin: 0; font-size: 15px; color: var(--ink3); }
-    .grid3 p b { color: var(--ink2); font-weight: 600; }
-
     .compare p { max-width: 68ch; color: var(--ink3); font-size: 15.5px; }
-    .compare p b { color: var(--ink2); font-weight: 600; }
 
     .install .box {
       background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
@@ -179,7 +171,6 @@
     @media (max-width: 960px) { .demo-types { display: none; } .demo-body { grid-template-columns: 210px 1fr; } }
     @media (max-width: 700px) {
       .demo-tree { display: none; } .demo-body { grid-template-columns: 1fr; height: 400px; }
-      .grid3 { grid-template-columns: 1fr; gap: 24px; }
     }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   </style>
@@ -196,11 +187,11 @@
     </header>
 
     <section class="hero">
-      <h1>See where the space went<em>.</em></h1>
+      <h1>See where the space went.</h1>
       <p class="sub">
-        mathom is a <strong>free, open-source disk space analyzer for Windows</strong>.
+        mathom is a disk space analyzer for Windows, free and open source.
         It reads the drive's Master File Table directly, so a couple million files map
-        in a few seconds, and results stream in live while the scan runs.
+        in a few seconds, and results stream in while the scan runs.
       </p>
       <div class="cta">
         <a class="btn primary" id="dl" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
@@ -213,9 +204,9 @@
       <h2>Try it</h2>
       <p class="lead">
         The window below is the real interface running on made-up files. Hover the map,
-        click a folder to go deeper, and come back up with the tree or the breadcrumb.
-        The search box understands the app's filter grammar, so <b>&gt;500mb</b> and
-        <b>ext:mp4</b> both work. Press <b>Rescan</b> to watch how a live scan streams in.
+        click a folder to go deeper, come back up with the tree or the breadcrumb.
+        The search box takes the app's filter grammar: <code>&gt;500mb</code>,
+        <code>ext:mp4</code>, or part of a name. Press Rescan to watch a scan stream in.
       </p>
       <div class="demo-window" aria-label="Interactive demo of the mathom interface">
         <div class="demo-toolbar">
@@ -235,46 +226,36 @@
         <div class="demo-status"><span id="st-left"></span><span id="st-right"></span></div>
       </div>
       <p class="demo-caption">
-        The files are fake. The treemap math is not: it's the same squarified layout
-        the app computes in Rust, ported line for line.
+        The files are made up, but the layout is the app's own squarified treemap
+        algorithm, ported from its Rust core.
       </p>
     </section>
 
-    <section>
-      <div class="grid3">
-        <div>
-          <h3>MFT-fast</h3>
-          <p>On NTFS drives mathom reads the <b>Master File Table</b> instead of walking
-          folders: about 2.4 seconds for 2 million files on an ordinary NVMe laptop.
-          Without admin rights it quietly falls back to a parallel folder walker.</p>
-        </div>
-        <div>
-          <h3>Live from the first batch</h3>
-          <p>The tree and treemap <b>fill in while the scan runs</b>, so you can start
-          poking around before it finishes. There is no progress bar to stare at.</p>
-        </div>
-        <div>
-          <h3>Honest sizes, safe deletes</h3>
-          <p>Logical and allocated size, NTFS compression, sparse files, hardlinks
-          counted once, and OneDrive placeholders that claim gigabytes while occupying
-          almost nothing. Deletes go to the <b>Recycle Bin</b>, and mathom refuses to
-          touch Windows-critical folders at all.</p>
-        </div>
-      </div>
+    <section class="compare">
+      <h2>How it works</h2>
+      <p>On NTFS drives mathom reads the Master File Table instead of walking folders.
+      A two-million-file drive takes about 2.4 seconds on an ordinary NVMe laptop.
+      Without admin rights it falls back to a parallel folder walker, which is slower
+      but needs no elevation. Either way, results stream in while the scan runs, so
+      you can start looking around before it finishes.</p>
+      <p>Sizes are the fiddly part: logical versus allocated, NTFS compression, sparse
+      files, hardlinks that should only count once, OneDrive placeholders that claim
+      gigabytes while occupying almost nothing on disk. mathom reports each of these
+      correctly. Deletes go to the Recycle Bin, and folders Windows depends on can't
+      be deleted from mathom at all.</p>
     </section>
 
     <section class="compare">
       <h2>An alternative to WinDirStat, WizTree, and TreeSize</h2>
-      <p><b>WinDirStat</b> does the same job and popularized the treemap, but its scans
-      take minutes where mathom takes seconds, and its interface has not changed much
+      <p>WinDirStat does the same job and popularized the treemap, but its scans take
+      minutes where mathom takes seconds, and its interface has not changed much
       since 2007.</p>
-      <p><b>WizTree</b> reads the MFT the same way and is about as fast (mathom measured
+      <p>WizTree reads the MFT the same way and is about as fast (mathom measured
       slightly faster on our test machine), but it is closed source and paid for
-      business use. mathom is MIT licensed: free everywhere, and you can read every
-      line of the scanner.</p>
-      <p><b>TreeSize</b> is paid for commercial use, and <b>DaisyDisk</b> stayed on the
-      Mac. If you want that class of interface on Windows without a license to track,
-      this is the niche mathom was built for.</p>
+      business use. mathom is MIT licensed, and you can read every line of the
+      scanner.</p>
+      <p>TreeSize charges per seat for business use, and DaisyDisk never left the Mac.
+      mathom is MIT licensed, so using it at work is simply allowed.</p>
     </section>
 
     <section class="install" id="get">
