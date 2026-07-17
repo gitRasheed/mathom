@@ -4,6 +4,8 @@ A fast disk space analyzer for Windows. Scan a drive, see where the space
 went, clean it up: live tree, zoomable treemap, file-type breakdown, search,
 and delete to the Recycle Bin.
 
+![mathom after a 3-second full scan of a 363 GB NTFS drive: tree view, zoomable treemap, and file-type breakdown](docs/screenshot.png)
+
 **Status: alpha.** Scanning and the UI work end to end, but expect rough
 edges and breaking changes between releases. Windows only for now; the core
 crates build on Linux and macOS by design, there just is no UI for them yet.
