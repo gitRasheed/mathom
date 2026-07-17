@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mathom — fast, free, open-source disk space analyzer for Windows</title>
+  <meta name="description" content="See what's eating your disk space. mathom reads NTFS drives straight from the Master File Table — millions of files mapped in seconds as a live treemap. A free, open-source alternative to WinDirStat, WizTree, and TreeSize. MIT licensed, no telemetry." />
+  <link rel="canonical" href="https://gitrasheed.github.io/mathom/" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="mathom — fast, free, open-source disk analyzer for Windows" />
+  <meta property="og:description" content="Scans millions of files in seconds by reading the MFT directly. Live treemap, honest sizes, safe deletes. Free for personal and commercial use." />
+  <meta property="og:url" content="https://gitrasheed.github.io/mathom/" />
+  <meta property="og:image" content="https://gitrasheed.github.io/mathom/screenshot.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "mathom",
+    "operatingSystem": "Windows 10, Windows 11",
+    "applicationCategory": "UtilitiesApplication",
+    "description": "Fast open-source disk space analyzer for Windows. Reads NTFS Master File Tables directly, streams results into a live treemap, deletes safely to the Recycle Bin.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "license": "https://github.com/gitRasheed/mathom/blob/main/LICENSE",
+    "downloadUrl": "https://github.com/gitRasheed/mathom/releases/latest",
+    "screenshot": "https://gitrasheed.github.io/mathom/screenshot.png",
+    "sameAs": ["https://github.com/gitRasheed/mathom"]
+  }
+  </script>
+  <style>
+    /* Tokens lifted verbatim from the app (ui/src/index.css, dark baseline). */
+    :root {
+      --app: #0f1115; --panel: #18181b; --hush: #1c1e24; --raised: #27272a;
+      --edge: #27272a; --edge-strong: #3f3f46;
+      --plate: #30323a; --grain: #454a57;
+      --ink: #f4f4f5; --ink2: #d4d4d8; --ink3: #a1a1aa; --ink4: #71717a; --ink5: #52525b;
+      --accent: #0d9488; --accent-hover: #14b8a6; --accent-ink: #2dd4bf;
+      --page: #0a0b0e; --warn: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--page); color: var(--ink2);
+      font-family: "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      font-size: 16px; line-height: 1.6; overflow-x: hidden;
+    }
+    a { color: var(--accent-ink); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+    header.site { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+    .wordmark { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; font-size: 16px; }
+    .wordmark img { width: 24px; height: 24px; border-radius: 6px; }
+    header.site nav a { color: var(--ink3); font-size: 14px; margin-left: 20px; }
+    header.site nav a:hover { color: var(--ink); text-decoration: none; }
+
+    .hero { padding: 72px 0 56px; }
+    .hero h1 {
+      font-family: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      font-size: clamp(38px, 6.5vw, 62px); font-weight: 700; letter-spacing: -0.02em;
+      line-height: 1.06; color: var(--ink); margin: 0 0 20px; max-width: 15ch;
+    }
+    .hero h1 em { font-style: normal; color: var(--accent-ink); }
+    .hero p.sub { font-size: 19px; color: var(--ink3); max-width: 56ch; margin: 0 0 32px; }
+    .hero p.sub strong { color: var(--ink2); font-weight: 600; }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .btn {
+      display: inline-block; padding: 11px 22px; border-radius: 8px; font-size: 15px;
+      font-weight: 600; border: 1px solid transparent; cursor: pointer;
+    }
+    .btn.primary { background: var(--accent); color: #fff; }
+    .btn.primary:hover { background: var(--accent-hover); text-decoration: none; }
+    .btn.ghost { background: transparent; color: var(--ink2); border-color: var(--edge-strong); }
+    .btn.ghost:hover { background: var(--panel); text-decoration: none; }
+    .fineprint { margin-top: 16px; font-size: 13.5px; color: var(--ink4); }
+    .fineprint b { color: var(--ink3); font-weight: 600; }
+    #dl-meta { font-variant-numeric: tabular-nums; }
+
+    section { padding: 56px 0; }
+    section h2 {
+      font-family: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      font-size: clamp(24px, 3.4vw, 32px); font-weight: 700; letter-spacing: -0.015em;
+      color: var(--ink); margin: 0 0 10px;
+    }
+    section p.lead { color: var(--ink3); max-width: 62ch; margin: 0 0 28px; }
+
+    /* ---- the demo window ---- */
+    .demo-window {
+      background: var(--app); border: 1px solid var(--edge); border-radius: 10px;
+      overflow: hidden; box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+      user-select: none; -webkit-user-select: none;
+    }
+    .demo-toolbar {
+      display: flex; align-items: center; gap: 12px; padding: 8px 10px;
+      border-bottom: 1px solid var(--edge); font-size: 13px;
+    }
+    .demo-toolbar .scanbtn {
+      background: var(--accent); border: none; color: #fff; font-weight: 600;
+      font-size: 13px; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+      font-family: inherit;
+    }
+    .demo-toolbar .scanbtn:hover { background: var(--accent-hover); }
+    .demo-toolbar .searchbox {
+      flex: 1; max-width: 380px; margin: 0 auto; background: var(--panel);
+      border: 1px solid var(--edge); border-radius: 6px; padding: 6px 12px;
+      color: var(--ink5); font-size: 12.5px; white-space: nowrap; overflow: hidden;
+    }
+    .demo-toolbar .winbtns { display: flex; gap: 14px; color: var(--ink4); font-size: 12px; padding-right: 4px; }
+    .demo-body { display: grid; grid-template-columns: 224px 1fr 190px; height: 460px; }
+    .demo-tree { border-right: 1px solid var(--edge); overflow: hidden; padding: 6px 0; font-size: 12.5px; }
+    .demo-tree .row {
+      display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 10px;
+      color: var(--ink2); cursor: pointer; align-items: center; line-height: 1.5;
+    }
+    .demo-tree .row:hover { background: var(--hush); }
+    .demo-tree .row .sz { color: var(--ink4); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+    .demo-tree .row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .demo-tree .bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--raised); overflow: hidden; margin: 0 0 2px; }
+    .demo-tree .bar i { display: block; height: 100%; background: var(--accent); width: 0%; }
+    .demo-main { position: relative; min-width: 0; }
+    .demo-crumbs { position: absolute; top: 0; left: 0; right: 0; padding: 6px 10px; font-size: 12px; color: var(--ink3); z-index: 2; display: flex; gap: 4px; }
+    .demo-crumbs span { cursor: pointer; }
+    .demo-crumbs span:hover { color: var(--ink); }
+    .demo-crumbs span:last-child { color: var(--ink2); cursor: default; }
+    #map { position: absolute; inset: 30px 8px 8px; width: calc(100% - 16px); height: calc(100% - 38px); }
+    .demo-types { border-left: 1px solid var(--edge); padding: 10px 12px; overflow: hidden; font-size: 12px; }
+    .demo-types h3 { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink4); margin: 0 0 8px; }
+    .demo-types .t { display: flex; align-items: center; gap: 7px; padding: 2.5px 0; color: var(--ink2); }
+    .demo-types .t .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .demo-types .t .ext { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .demo-types .t .sz { color: var(--ink4); font-variant-numeric: tabular-nums; font-size: 11px; }
+    .demo-status {
+      display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px;
+      border-top: 1px solid var(--edge); font-size: 12px; color: var(--ink3);
+      font-variant-numeric: tabular-nums;
+    }
+    .demo-caption { margin-top: 14px; font-size: 13.5px; color: var(--ink4); }
+    #tip {
+      position: fixed; z-index: 10; pointer-events: none; display: none;
+      background: rgba(24,24,27,0.96); border: 1px solid var(--edge-strong);
+      border-radius: 7px; padding: 8px 11px; font-size: 12px; max-width: 340px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    #tip .n { color: var(--ink); font-weight: 600; }
+    #tip .d { color: var(--ink3); }
+    #tip .p { color: var(--ink5); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
+    .grid3 h3 { font-size: 11.5px; font-weight: 600; letter-spacing: 0.09em; color: var(--accent-ink); margin: 0 0 10px; text-transform: uppercase; }
+    .grid3 p { margin: 0; font-size: 15px; color: var(--ink3); }
+    .grid3 p b { color: var(--ink2); font-weight: 600; }
+
+    .compare p { max-width: 68ch; color: var(--ink3); font-size: 15.5px; }
+    .compare p b { color: var(--ink2); font-weight: 600; }
+
+    .install .box {
+      background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+      padding: 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: center;
+    }
+    .install code {
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 13.5px;
+      background: var(--app); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 12px;
+      color: var(--ink3); display: inline-block;
+    }
+    .install .alt { font-size: 13.5px; color: var(--ink4); }
+
+    footer { border-top: 1px solid var(--edge); padding: 28px 0 40px; font-size: 13.5px; color: var(--ink4); }
+    footer .links { display: flex; gap: 20px; margin-bottom: 12px; }
+    footer .links a { color: var(--ink3); }
+    footer .name-story { max-width: 60ch; }
+
+    @media (max-width: 960px) { .demo-types { display: none; } .demo-body { grid-template-columns: 200px 1fr; } }
+    @media (max-width: 700px) {
+      .demo-tree { display: none; } .demo-body { grid-template-columns: 1fr; height: 400px; }
+      .grid3 { grid-template-columns: 1fr; gap: 24px; }
+      .demo-toolbar .searchbox { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <div class="wordmark"><img src="favicon.svg" alt="" width="24" height="24" /> mathom</div>
+      <nav>
+        <a href="#demo">Demo</a>
+        <a href="#get">Download</a>
+        <a href="https://github.com/gitRasheed/mathom">GitHub</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>See where the space went<em>.</em></h1>
+      <p class="sub">
+        mathom is a <strong>free, open-source disk space analyzer for Windows</strong>.
+        It reads NTFS drives straight from the Master File Table — a couple of million
+        files map in seconds, live, as a zoomable treemap.
+      </p>
+      <div class="cta">
+        <a class="btn primary" id="dl" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
+        <a class="btn ghost" href="#demo">Try the UI below</a>
+      </div>
+      <p class="fineprint"><b>MIT licensed</b> · free at home and at work · no telemetry, ever <span id="dl-meta"></span></p>
+    </section>
+
+    <section id="demo">
+      <h2>This is the interface. Try it.</h2>
+      <p class="lead">
+        mathom's UI is web-native, so this page can run it. Example data, scripted scan,
+        real interface: press <b>Scan</b>, hover the map, click a folder to drill in,
+        climb back out with the breadcrumb.
+      </p>
+      <div class="demo-window" aria-label="Interactive demo of the mathom interface">
+        <div class="demo-toolbar">
+          <button class="scanbtn" id="scan">Scan ▾</button>
+          <div class="searchbox">Try &gt;500mb — filter by size</div>
+          <div class="winbtns" aria-hidden="true"><span>—</span><span>▢</span><span>✕</span></div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-tree" id="tree"></div>
+          <div class="demo-main">
+            <div class="demo-crumbs" id="crumbs"></div>
+            <canvas id="map"></canvas>
+          </div>
+          <div class="demo-types" id="types"><h3>FILE TYPES</h3></div>
+        </div>
+        <div class="demo-status"><span id="st-left">Ready — press Scan</span><span id="st-right">0 nodes</span></div>
+      </div>
+      <p class="demo-caption">
+        Scripted demo with example data. The real app does exactly this to an actual
+        2,000,000-file drive — streaming in live at millions of files per second.
+      </p>
+    </section>
+
+    <section>
+      <div class="grid3">
+        <div>
+          <h3>MFT-fast</h3>
+          <p>On NTFS, mathom skips folder walking and reads the <b>Master File Table</b>
+          directly — 2 million files in about 2.4 seconds on an ordinary NVMe laptop.
+          No admin rights? It falls back to a fast parallel walker, automatically.</p>
+        </div>
+        <div>
+          <h3>Live from the first batch</h3>
+          <p>Results <b>stream in while the scan runs</b> — the tree and treemap grow in
+          front of you instead of appearing after a progress bar. You're exploring
+          before it finishes.</p>
+        </div>
+        <div>
+          <h3>Honest sizes, safe deletes</h3>
+          <p>Logical vs. allocated size, NTFS compression, sparse files, hardlinks
+          counted once, OneDrive placeholders reported truthfully. Deletes go to the
+          <b>Recycle Bin</b>, and Windows-critical folders are refused outright.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="compare">
+      <h2>An alternative to WinDirStat, WizTree, and TreeSize</h2>
+      <p>Coming from <b>WinDirStat</b>? Same job, same treemap idea — but scans finish
+      in seconds instead of minutes, and the interface was designed this decade.</p>
+      <p>Coming from <b>WizTree</b>? mathom uses the same MFT-reading technique at
+      comparable speed — faster on our test machine — and it's <b>open source</b>:
+      MIT licensed, free for commercial use, no nag screens, and you can read every
+      line of the scanner.</p>
+      <p>Evaluating <b>TreeSize</b> or missing <b>DaisyDisk</b> from your Mac?
+      mathom is free for work machines by license, not by loophole — and it takes the
+      visual side as seriously as the scan speed.</p>
+    </section>
+
+    <section class="install" id="get">
+      <h2>Get mathom</h2>
+      <div class="box">
+        <a class="btn primary" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
+        <div class="alt">
+          MSI installer, setup.exe, or portable zip — from
+          <a href="https://github.com/gitRasheed/mathom/releases">GitHub Releases</a>.<br />
+          The binaries are unsigned while in alpha, so SmartScreen will ask once:
+          “More info” → “Run anyway”.
+        </div>
+      </div>
+      <p class="fineprint" style="margin-top:14px">
+        Coming soon: <code style="padding:2px 8px">winget install gitRasheed.mathom</code>
+        · or <a href="https://github.com/gitRasheed/mathom#build-from-source">build from source</a>
+      </p>
+    </section>
+
+    <footer>
+      <div class="links">
+        <a href="https://github.com/gitRasheed/mathom">GitHub</a>
+        <a href="https://github.com/gitRasheed/mathom/releases">Releases</a>
+        <a href="https://github.com/gitRasheed/mathom/blob/main/LICENSE">MIT License</a>
+      </div>
+      <p class="name-story">A <i>mathom</i> is what hobbits call a thing they have no
+      use for but can't bring themselves to throw away. Disks are full of them.</p>
+    </footer>
+  </div>
+
+  <div id="tip"><div class="n"></div><div class="d"></div><div class="p"></div></div>
+
+  <script>
+  "use strict";
+  // ---------- example data (seeded, same for every visitor) ----------
+  let seed = 0x6d617468; // "math"
+  const rnd = () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const GB = 1024 ** 3, MB = 1024 ** 2, KB = 1024;
+  const CAT = { // category → tile color (the app's palette.ts)
+    video: "#a855f7", audio: "#22c55e", image: "#eab308", archive: "#f97316",
+    doc: "#3b82f6", code: "#06b6d4", exe: "#ec4899", system: "#64748b",
+    data: "#84cc16", other: "#71717a",
+  };
+  const EXT_CAT = {
+    mp4: "video", mkv: "video", mov: "video", mp3: "audio", flac: "audio",
+    jpg: "image", png: "image", cr3: "image", zip: "archive", "7z": "archive",
+    iso: "archive", pdf: "doc", docx: "doc", xlsx: "doc", js: "code", ts: "code",
+    rs: "code", json: "code", map: "code", exe: "exe", dll: "exe", msi: "exe",
+    sys: "system", manifest: "system", mui: "system", pak: "data", bin: "data",
+    dat: "data", vhdx: "data", blend: "data",
+  };
+  const catOf = (name, isDir) => {
+    if (isDir) return null;
+    const i = name.lastIndexOf(".");
+    return CAT[EXT_CAT[i < 0 ? "" : name.slice(i + 1).toLowerCase()] || "other"];
+  };
+  function dir(name, children) { return { name, children }; }
+  function file(name, size) { return { name, size }; }
+  // A swarm of small files: what the app's plate grain exists for.
+  function swarm(n, lo, hi, namer) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(file(namer(i), lo + rnd() * (hi - lo)));
+    return out;
+  }
+  const camera = (i) => `IMG_${5800 + i}.CR3`;
+  const winsxs = (i) => `amd64_microsoft-windows-c..${(1000 + i).toString(16)}.manifest`;
+  const chunks = (i) => (i % 3 ? `chunk-${(i * 2654435761 >>> 16).toString(16)}.js` : `chunk-${i}.js.map`);
+  const dlls = (i) => `api-ms-win-core-${["file","memory","sync","heap","com","rtl"][i % 6]}-l1-${1 + (i % 3)}.dll`;
+
+  const ROOT = dir("C:", [
+    dir("Users", [
+      dir("Videos", [
+        file("wedding-4k.mp4", 31 * GB), file("holiday-2024.mp4", 22 * GB),
+        file("drone-footage.mkv", 18 * GB), file("timelapse-alps.mov", 11 * GB),
+        dir("screen-recordings", swarm(14, 0.3 * GB, 1.6 * GB, (i) => `recording-${i + 1}.mkv`)),
+      ]),
+      dir("AppData", [
+        dir("Local", [
+          dir("cache", swarm(40, 4 * MB, 300 * MB, (i) => `f_${(i + 0x1000).toString(16)}.dat`)),
+          file("outlook.ost", 9 * GB), file("docker_data.vhdx", 14 * GB),
+        ]),
+        dir("Roaming", swarm(24, 1 * MB, 220 * MB, (i) => `settings-${i}.json`)),
+      ]),
+      dir("Documents", [
+        dir("projects", [
+          dir("node_modules", swarm(160, 2 * KB, 900 * KB, chunks)),
+          file("thesis-final-v7.docx", 24 * MB), file("figures.xlsx", 9 * MB),
+          dir("target", swarm(30, 1 * MB, 190 * MB, (i) => `mathom-${i}.rlib`)),
+        ]),
+        file("backups-2023.zip", 12 * GB), file("tax-return-2025.pdf", 4 * MB),
+      ]),
+      dir("Pictures", [
+        dir("shoot-iceland", swarm(46, 22 * MB, 60 * MB, camera)),
+        dir("shoot-street", swarm(38, 20 * MB, 55 * MB, camera)),
+        file("wallpaper-pack.zip", 2.1 * GB),
+      ]),
+      dir("Downloads", [
+        file("ubuntu-24.04-desktop.iso", 5.8 * GB), file("game-setup.exe", 2.4 * GB),
+        file("dataset.7z", 3.1 * GB),
+        ...swarm(16, 3 * MB, 700 * MB, (i) => `download (${i + 1}).zip`),
+      ]),
+    ]),
+    dir("Program Files", [
+      dir("Starfall", [
+        ...swarm(9, 2 * GB, 7 * GB, (i) => `content-${i}.pak`),
+        file("starfall.exe", 180 * MB),
+      ]),
+      dir("Blender", [file("blender.exe", 240 * MB), ...swarm(18, 4 * MB, 300 * MB, dlls)]),
+      dir("common", swarm(34, 2 * MB, 400 * MB, dlls)),
+    ]),
+    dir("Windows", [
+      dir("System32", swarm(120, 200 * KB, 90 * MB, dlls)),
+      dir("WinSxS", swarm(200, 20 * KB, 30 * MB, winsxs)),
+      dir("Installer", swarm(12, 40 * MB, 900 * MB, (i) => `${(i * 7 + 10).toString(16)}c2a.msi`)),
+    ]),
+    dir("ProgramData", swarm(26, 6 * MB, 1.4 * GB, (i) => `pkg-cache-${i}.bin`)),
+    dir("Games", [
+      dir("AncientForge", [...swarm(6, 3 * GB, 9 * GB, (i) => `assets-${i}.pak`), file("forge.exe", 120 * MB)]),
+    ]),
+    file("pagefile.sys", 12 * GB),
+    file("hiberfil.sys", 6.3 * GB),
+  ]);
+
+  // Resolve sizes, parents, paths, reveal order.
+  const leaves = [];
+  (function prep(node, parent, path) {
+    node.parent = parent; node.path = path + node.name;
+    if (node.children) {
+      node.size = 0;
+      for (const c of node.children) { prep(c, node, node.path + "\\"); node.size += c.size; }
+      node.children.sort((a, b) => b.size - a.size);
+    } else {
+      node.cat = catOf(node.name, false);
+      leaves.push(node);
+    }
+  })(ROOT, null, "");
+  for (let i = leaves.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [leaves[i], leaves[j]] = [leaves[j], leaves[i]]; }
+  leaves.forEach((f, i) => { f.at = (i + 1) / leaves.length; });
+
+  // ---------- squarified layout (ported from mathom-core's treemap.rs) ----------
+  function layout(root, W, H, reveal) {
+    const rects = [];
+    const eff = (n) => {
+      if (!n.children) return n.at <= reveal ? n.size : 0;
+      let s = 0; for (const c of n.children) s += eff(c);
+      return s;
+    };
+    function children(node, x, y, w, h, depth) {
+      if (depth > 3 || w < 4 || h < 4) return;
+      const items = node.children.map((c) => [c, eff(c)]).filter((e) => e[1] > 0);
+      if (!items.length) return;
+      items.sort((a, b) => b[1] - a[1]);
+      const total = items.reduce((s, e) => s + e[1], 0);
+      const scale = (w * h) / total;
+      let rx = x, ry = y, rw = w, rh = h, i = 0;
+      const worst = (sum, mx, mn, side) => {
+        const s2 = sum * sum, w2 = side * side;
+        return Math.max((w2 * mx) / s2, s2 / (w2 * mn));
+      };
+      while (i < items.length) {
+        if (rw <= 0.5 || rh <= 0.5) return;
+        const side = Math.min(rw, rh);
+        let sum = items[i][1] * scale, mx = sum, mn = sum, j = i + 1, bad = worst(sum, mx, mn, side);
+        while (j < items.length) {
+          const a = items[j][1] * scale;
+          const cand = worst(sum + a, Math.max(mx, a), Math.min(mn, a), side);
+          if (cand > bad) break;
+          bad = cand; sum += a; mx = Math.max(mx, a); mn = Math.min(mn, a); j++;
+        }
+        const horiz = rw < rh, len = horiz ? rw : rh, thick = Math.min(sum / len, horiz ? rh : rw);
+        let off = 0;
+        for (let k = i; k < j; k++) {
+          const L = k === j - 1 ? len - off : (items[k][1] * scale) / thick;
+          const [cx, cy, cw, ch] = horiz ? [rx + off, ry, L, thick] : [rx, ry + off, thick, L];
+          off += L;
+          if (cw * ch >= 1) {
+            const c = items[k][0];
+            rects.push({ n: c, x: cx, y: cy, w: cw, h: ch, d: depth });
+            if (c.children && cw > 2 && ch > 2) children(c, cx + 1, cy + 1, cw - 2, ch - 2, depth + 1);
+          }
+        }
+        if (horiz) { ry += thick; rh -= thick; } else { rx += thick; rw -= thick; }
+        i = j;
+      }
+    }
+    rects.push({ n: root, x: 0, y: 0, w: W, h: H, d: 0 });
+    children(root, 1, 1, W - 2, H - 2, 1);
+    return rects;
+  }
+
+  // ---------- rendering ----------
+  const canvas = document.getElementById("map"), ctx = canvas.getContext("2d");
+  const tip = document.getElementById("tip");
+  let view = ROOT, reveal = 0, rects = [], hovered = null, grainPat = null, dpr = 1;
+  function grain() {
+    if (grainPat) return grainPat;
+    const t = document.createElement("canvas"); t.width = t.height = 4;
+    const g = t.getContext("2d");
+    g.fillStyle = "#30323a"; g.fillRect(0, 0, 4, 4);
+    g.fillStyle = "#454a57"; g.fillRect(1, 1, 1, 1);
+    return (grainPat = ctx.createPattern(t, "repeat"));
+  }
+  function draw() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== (w * dpr) | 0) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#0f1115"; ctx.fillRect(0, 0, w, h);
+    rects = reveal > 0 ? layout(view, w, h, reveal) : [];
+    for (const r of rects) {
+      if (r.n.children) { ctx.fillStyle = r.d === 0 ? "#0f1115" : grain(); }
+      else ctx.fillStyle = r.n.cat;
+      const x = Math.round(r.x), y = Math.round(r.y);
+      const rw = Math.max(1, Math.round(r.x + r.w) - x - 1), rh = Math.max(1, Math.round(r.y + r.h) - y - 1);
+      ctx.fillRect(x, y, rw, rh);
+      if (!r.n.children && rw > 3 && rh > 3) { // soft top-light, like the app's sprite
+        const gr = ctx.createLinearGradient(x, y, x, y + rh);
+        gr.addColorStop(0, "rgba(255,255,255,0.18)"); gr.addColorStop(0.5, "rgba(255,255,255,0)");
+        gr.addColorStop(1, "rgba(0,0,0,0.18)");
+        ctx.fillStyle = gr; ctx.fillRect(x, y, rw, rh);
+      }
+    }
+    if (hovered && hovered.n !== view) {
+      ctx.strokeStyle = "#2dd4bf"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(hovered.x + 0.75, hovered.y + 0.75, hovered.w - 1.5, hovered.h - 1.5);
+    }
+  }
+
+  // ---------- side panes + status ----------
+  const fmt = (b) => b >= GB ? (b / GB).toFixed(b >= 10 * GB ? 0 : 1) + " GB"
+    : b >= MB ? (b / MB).toFixed(0) + " MB" : (b / KB).toFixed(0) + " KB";
+  const effSize = (n) => { // revealed size, for live panes
+    if (!n.children) return n.at <= reveal ? n.size : 0;
+    let s = 0; for (const c of n.children) s += effSize(c); return s;
+  };
+  function renderPanes() {
+    const treeEl = document.getElementById("tree");
+    const total = effSize(view) || 1;
+    let html = "";
+    for (const c of view.children.slice(0, 12)) {
+      const s = effSize(c); if (!s) continue;
+      html += `<div class="row" data-p="${c.path}"><span class="nm">${c.children ? "▸ " : ""}${c.name}</span>` +
+        `<span class="sz">${fmt(s)}</span><span class="bar"><i style="width:${(100 * s / total).toFixed(1)}%"></i></span></div>`;
+    }
+    treeEl.innerHTML = html;
+    const types = {};
+    (function walk(n) {
+      if (!n.children) { if (n.at <= reveal) { const i = n.name.lastIndexOf(".");
+        const ext = i < 0 ? "(no ext)" : n.name.slice(i); const t = types[ext] || (types[ext] = { s: 0, c: n.cat });
+        t.s += n.size; } return; }
+      n.children.forEach(walk);
+    })(view);
+    const top = Object.entries(types).sort((a, b) => b[1].s - a[1].s).slice(0, 14);
+    document.getElementById("types").innerHTML = "<h3>FILE TYPES</h3>" +
+      top.map(([e, t]) => `<div class="t"><span class="dot" style="background:${t.c}"></span><span class="ext">${e}</span><span class="sz">${fmt(t.s)}</span></div>`).join("");
+    const crumbs = []; for (let n = view; n; n = n.parent) crumbs.unshift(n);
+    document.getElementById("crumbs").innerHTML =
+      crumbs.map((n, i) => `<span data-p="${n.path}">${n.name}${i < crumbs.length - 1 ? " ›" : ""}</span>`).join(" ");
+  }
+
+  // ---------- the scripted scan ----------
+  const DUR = 2400, FILES = 1284022;
+  let scanning = false, done = false;
+  const stL = document.getElementById("st-left"), stR = document.getElementById("st-right");
+  function scan() {
+    if (scanning) return;
+    scanning = true; done = false; view = ROOT; reveal = 0;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const t0 = performance.now();
+    function frame(t) {
+      const p = reduce ? 1 : Math.min(1, (t - t0) / DUR);
+      reveal = 1 - Math.pow(1 - p, 1.8); // fast start, settling end — like a real scan
+      draw(); renderPanes();
+      const files = Math.round(FILES * reveal);
+      if (p < 1) {
+        stL.textContent = `Scanning C:\\ — ${files.toLocaleString()} files · ${fmt(effSize(ROOT))} · ${Math.round(FILES / (DUR / 1000)).toLocaleString()} files/s`;
+        stR.textContent = `${files.toLocaleString()} nodes`;
+        requestAnimationFrame(frame);
+      } else {
+        scanning = false; done = true; reveal = 1; draw(); renderPanes();
+        stL.textContent = `Scan complete in 2.4s · ${FILES.toLocaleString()} files · ${fmt(ROOT.size)}`;
+        stR.textContent = `${FILES.toLocaleString()} nodes`;
+        document.getElementById("scan").textContent = "Rescan ▾";
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  document.getElementById("scan").addEventListener("click", scan);
+
+  // ---------- interactions ----------
+  const byPath = (p) => { let f = null; (function w(n) { if (n.path === p) f = n; else if (n.children) n.children.forEach(w); })(ROOT); return f; };
+  canvas.addEventListener("mousemove", (e) => {
+    const b = canvas.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+    hovered = null;
+    for (let i = rects.length - 1; i >= 0; i--) {
+      const r = rects[i];
+      if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { hovered = r; break; }
+    }
+    if (hovered && hovered.n !== view) {
+      const n = hovered.n, parent = effSize(n.parent) || 1;
+      tip.style.display = "block";
+      tip.querySelector(".n").textContent = n.name;
+      tip.querySelector(".d").textContent = `${fmt(effSize(n))} · ${(100 * effSize(n) / parent).toFixed(1)}% of ${n.parent.name}`;
+      tip.querySelector(".p").textContent = n.path;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      tip.style.left = Math.min(e.clientX + 14, innerWidth - tw - 8) + "px";
+      tip.style.top = (e.clientY + 18 + th > innerHeight ? e.clientY - th - 10 : e.clientY + 18) + "px";
+    } else tip.style.display = "none";
+    draw();
+  });
+  canvas.addEventListener("mouseleave", () => { hovered = null; tip.style.display = "none"; draw(); });
+  canvas.addEventListener("click", () => {
+    if (hovered && hovered.n.children && hovered.n !== view) { view = hovered.n; hovered = null; tip.style.display = "none"; draw(); renderPanes(); }
+  });
+  document.getElementById("crumbs").addEventListener("click", (e) => {
+    const p = e.target.dataset && e.target.dataset.p;
+    if (p) { const n = byPath(p); if (n && n.children) { view = n; draw(); renderPanes(); } }
+  });
+  document.getElementById("tree").addEventListener("click", (e) => {
+    const row = e.target.closest(".row"); if (!row) return;
+    const n = byPath(row.dataset.p); if (n && n.children) { view = n; draw(); renderPanes(); }
+  });
+  addEventListener("resize", () => { if (reveal > 0) { draw(); } });
+  draw(); renderPanes();
+
+  // ---------- latest-release link ----------
+  fetch("https://api.github.com/repos/gitRasheed/mathom/releases/latest")
+    .then((r) => r.json())
+    .then((rel) => {
+      const msi = (rel.assets || []).find((a) => a.name.endsWith(".msi"));
+      if (msi) {
+        document.getElementById("dl").href = msi.browser_download_url;
+        document.getElementById("dl-meta").textContent =
+          ` · ${rel.tag_name} MSI, ${(msi.size / MB).toFixed(1)} MB`;
+      }
+    })
+    .catch(() => {});
+  </script>
+</body>
+</html>
