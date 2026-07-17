@@ -51,16 +51,16 @@
     .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 
     header.site { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
-    .wordmark { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; font-size: 16px; }
+    .wordmark { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; font-size: 15px; font-family: "Cascadia Code", Consolas, ui-monospace, monospace; }
     .wordmark img { width: 24px; height: 24px; border-radius: 6px; }
     header.site nav a { color: var(--ink3); font-size: 14px; margin-left: 20px; }
     header.site nav a:hover { color: var(--ink); text-decoration: none; }
 
-    .hero { padding: 72px 0 56px; }
+    .hero { padding: 52px 0 0; }
     .hero h1 {
-      font-family: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-      font-size: clamp(38px, 6.5vw, 62px); font-weight: 700; letter-spacing: -0.02em;
-      line-height: 1.06; color: var(--ink); margin: 0 0 20px; max-width: 15ch;
+      font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+      font-size: clamp(28px, 4.4vw, 44px); font-weight: 700; letter-spacing: -0.03em;
+      line-height: 1.15; color: var(--ink); margin: 0 0 18px;
     }
     .hero p.sub { font-size: 19px; color: var(--ink3); max-width: 56ch; margin: 0 0 32px; }
     .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
@@ -78,9 +78,13 @@
 
     section { padding: 56px 0; }
     section h2 {
-      font-family: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-      font-size: clamp(24px, 3.4vw, 32px); font-weight: 700; letter-spacing: -0.015em;
+      font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+      font-size: clamp(19px, 2.4vw, 25px); font-weight: 700; letter-spacing: -0.02em;
       color: var(--ink); margin: 0 0 10px;
+    }
+    #demo { padding-top: 26px; }
+    a:focus-visible, button:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent-ink); outline-offset: 2px;
     }
     section p.lead { color: var(--ink3); max-width: 62ch; margin: 0 0 28px; }
     section p.lead b { color: var(--ink2); }
@@ -180,7 +184,6 @@
     <header class="site">
       <div class="wordmark"><img src="favicon.svg" alt="" width="24" height="24" /> mathom</div>
       <nav>
-        <a href="#demo">Demo</a>
         <a href="#get">Download</a>
         <a href="https://github.com/gitRasheed/mathom">GitHub</a>
       </nav>
@@ -195,19 +198,12 @@
       </p>
       <div class="cta">
         <a class="btn primary" id="dl" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
-        <a class="btn ghost" href="#demo">Try the UI below</a>
+        <a class="btn ghost" href="https://github.com/gitRasheed/mathom">View on GitHub</a>
       </div>
       <p class="fineprint"><b>MIT licensed</b> · free for personal and commercial use · no telemetry <span id="dl-meta"></span></p>
     </section>
 
     <section id="demo">
-      <h2>Try it</h2>
-      <p class="lead">
-        The window below is the real interface running on made-up files. Hover the map,
-        click a folder to go deeper, come back up with the tree or the breadcrumb.
-        The search box takes the app's filter grammar: <code>&gt;500mb</code>,
-        <code>ext:mp4</code>, or part of a name. Press Rescan to watch a scan stream in.
-      </p>
       <div class="demo-window" aria-label="Interactive demo of the mathom interface">
         <div class="demo-toolbar">
           <button class="scanbtn" id="scan">Rescan ▾</button>
@@ -226,8 +222,11 @@
         <div class="demo-status"><span id="st-left"></span><span id="st-right"></span></div>
       </div>
       <p class="demo-caption">
-        The files are made up, but the layout is the app's own squarified treemap
-        algorithm, ported from its Rust core.
+        This is the real interface on made-up files. Hover the map, click a folder to
+        go deeper, come back up with the tree or the breadcrumb. The search box takes
+        the app's filter grammar (<code>&gt;500mb</code>, <code>ext:mp4</code>, part of
+        a name), and Rescan replays how a scan streams in. The layout is the app's own
+        squarified treemap algorithm, ported from its Rust core.
       </p>
     </section>
 
