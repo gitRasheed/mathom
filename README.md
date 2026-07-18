@@ -1,6 +1,6 @@
 # mathom
 
-A fast disk space analyzer for Windows. Scan a drive, see where the space
+A fast disk space analyzer for Windows. Scan a drive, see where your space
 went, clean it up: live tree, zoomable treemap, file-type breakdown, search,
 and delete to the Recycle Bin.
 
