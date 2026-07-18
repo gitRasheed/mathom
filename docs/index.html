@@ -56,14 +56,14 @@
     header.site nav a { color: var(--ink3); font-size: 14px; margin-left: 20px; }
     header.site nav a:hover { color: var(--ink); text-decoration: none; }
 
-    .hero { padding: 52px 0 0; }
+    .hero { padding: 52px 0 0; text-align: center; }
     .hero h1 {
       font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
       font-size: clamp(28px, 4.4vw, 44px); font-weight: 700; letter-spacing: -0.03em;
       line-height: 1.15; color: var(--ink); margin: 0 0 18px;
     }
-    .hero p.sub { font-size: 19px; color: var(--ink3); max-width: 56ch; margin: 0 0 32px; }
-    .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .hero p.sub { font-size: 19px; color: var(--ink3); max-width: 56ch; margin: 0 auto 32px; }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; }
     .btn {
       display: inline-block; padding: 11px 22px; border-radius: 8px; font-size: 15px;
       font-weight: 600; border: 1px solid transparent; cursor: pointer;
@@ -144,7 +144,7 @@
       border-top: 1px solid var(--edge); font-size: 12px; color: var(--ink3);
       font-variant-numeric: tabular-nums;
     }
-    .demo-caption { margin-top: 14px; font-size: 13.5px; color: var(--ink4); }
+    .demo-caption { margin-top: 14px; font-size: 13.5px; color: var(--ink4); text-align: center; }
     #tip {
       position: fixed; z-index: 10; pointer-events: none; display: none;
       background: rgba(24,24,27,0.96); border: 1px solid var(--edge-strong);
@@ -155,12 +155,16 @@
     #tip .d { color: var(--ink3); }
     #tip .p { color: var(--ink5); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    .compare p { max-width: 68ch; color: var(--ink3); font-size: 15.5px; }
+    .compare { text-align: center; }
+    .compare p { max-width: 62ch; margin-left: auto; margin-right: auto; text-align: left; color: var(--ink3); font-size: 15.5px; }
 
+    .install { text-align: center; }
     .install .box {
       background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
-      padding: 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: center;
+      padding: 24px 32px; display: inline-flex; max-width: 100%;
+      flex-wrap: wrap; gap: 24px; align-items: center; justify-content: center;
     }
+    .install .alt { text-align: left; }
     .install .box code {
       background: var(--app); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 12px;
       color: var(--ink3); display: inline-block; font-size: 13.5px;
@@ -192,9 +196,8 @@
     <section class="hero">
       <h1>See where the space went.</h1>
       <p class="sub">
-        mathom is a disk space analyzer for Windows, free and open source.
-        It reads the drive's Master File Table directly, so a couple million files map
-        in a few seconds, and results stream in while the scan runs.
+        Free, open-source disk space analyzer for Windows.
+        Two million files scanned in 2.4 seconds.
       </p>
       <div class="cta">
         <a class="btn primary" id="dl" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
@@ -222,39 +225,25 @@
         <div class="demo-status"><span id="st-left"></span><span id="st-right"></span></div>
       </div>
       <p class="demo-caption">
-        This is the real interface on made-up files. Hover the map, click a folder to
-        go deeper, come back up with the tree or the breadcrumb. The search box takes
-        the app's filter grammar (<code>&gt;500mb</code>, <code>ext:mp4</code>, part of
-        a name), and Rescan replays how a scan streams in. The layout is the app's own
-        squarified treemap algorithm, ported from its Rust core.
+        The real interface, made-up files. Hover the map, click to go deeper.
       </p>
     </section>
 
     <section class="compare">
       <h2>How it works</h2>
-      <p>On NTFS drives mathom reads the Master File Table instead of walking folders.
-      A two-million-file drive takes about 2.4 seconds on an ordinary NVMe laptop.
-      Without admin rights it falls back to a parallel folder walker, which is slower
-      but needs no elevation. Either way, results stream in while the scan runs, so
-      you can start looking around before it finishes.</p>
-      <p>Sizes are the fiddly part: logical versus allocated, NTFS compression, sparse
-      files, hardlinks that should only count once, OneDrive placeholders that claim
-      gigabytes while occupying almost nothing on disk. mathom reports each of these
-      correctly. Deletes go to the Recycle Bin, and folders Windows depends on can't
-      be deleted from mathom at all.</p>
+      <p>mathom reads the NTFS Master File Table instead of walking folders, so a
+      full drive takes seconds, not minutes. Results stream in while the scan runs.</p>
+      <p>It gets the awkward sizes right: NTFS compression, sparse files, hardlinks,
+      OneDrive placeholders. Deletes go to the Recycle Bin, and folders Windows
+      depends on can't be deleted at all.</p>
     </section>
 
     <section class="compare">
       <h2>An alternative to WinDirStat, WizTree, and TreeSize</h2>
-      <p>WinDirStat does the same job and popularized the treemap, but its scans take
-      minutes where mathom takes seconds, and its interface has not changed much
-      since 2007.</p>
-      <p>WizTree reads the MFT the same way and is about as fast (mathom measured
-      slightly faster on our test machine), but it is closed source and paid for
-      business use. mathom is MIT licensed, and you can read every line of the
-      scanner.</p>
-      <p>TreeSize charges per seat for business use, and DaisyDisk never left the Mac.
-      mathom is MIT licensed, so using it at work is simply allowed.</p>
+      <p>WinDirStat scans in minutes where mathom takes seconds. WizTree is just as
+      fast but closed source and paid for business use. TreeSize charges per seat.
+      mathom is MIT licensed: free at home, free at work, and you can read every
+      line of the scanner.</p>
     </section>
 
     <section class="install" id="get">
@@ -262,16 +251,11 @@
       <div class="box">
         <a class="btn primary" href="https://github.com/gitRasheed/mathom/releases/latest">Download for Windows</a>
         <div class="alt">
-          MSI installer, setup.exe, or portable zip from
+          MSI, setup.exe, or portable zip from
           <a href="https://github.com/gitRasheed/mathom/releases">GitHub Releases</a>.<br />
-          The binaries are unsigned while in alpha, so SmartScreen will warn on first
-          run. Click "More info", then "Run anyway".
+          Unsigned while in alpha: when SmartScreen warns, click "More info", then "Run anyway".
         </div>
       </div>
-      <p class="fineprint" style="margin-top:14px">
-        Coming soon: <code style="padding:2px 8px">winget install mathom</code>
-        · or <a href="https://github.com/gitRasheed/mathom#build-from-source">build from source</a>
-      </p>
     </section>
 
     <footer>
