@@ -10,6 +10,7 @@ members = [
 [workspace.package]
 version = "0.2.1"
 edition = "2024"
+rust-version = "1.88"
 
 # Do NOT add panic = "abort": the scan workers' crash-safe Done contract
 # (mathom-scanner::spawn_scan_thread) depends on catch_unwind.
