@@ -580,6 +580,7 @@ pub fn delete_entry(
 
     // Re-checked here even though the dialog ran the preflight — this is
     // the enforcement point; the preflight is UX.
+    // This is a foot-gun guard, not a boundary against a local path-replacement race.
     if let Some(reason) = delete_block_reason(scan_state, &path) {
         return Err(reason);
     }
@@ -936,10 +937,22 @@ mod tests {
 
     #[test]
     fn finished_scans_defer_to_path_policy() {
-        assert!(delete_block_reason(ScanState::Done, "C:\\Users\\me\\big.iso").is_none());
-        assert!(delete_block_reason(ScanState::Cancelled, "C:\\Users\\me\\big.iso").is_none());
-        assert!(delete_block_reason(ScanState::Failed, "C:\\Users\\me\\big.iso").is_none());
-        // Path policy still applies once the scan is over.
-        assert!(delete_block_reason(ScanState::Done, "C:\\$Recycle.Bin").is_some());
+        let path = std::env::temp_dir().join(format!(
+            "mathom-delete-policy-scan-state-{}.tmp",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"test").unwrap();
+        let path = path.to_string_lossy();
+
+        assert!(delete_block_reason(ScanState::Done, &path).is_none());
+        assert!(delete_block_reason(ScanState::Cancelled, &path).is_none());
+        assert!(delete_block_reason(ScanState::Failed, &path).is_none());
+
+        #[cfg(windows)]
+        assert!(
+            delete_block_reason(ScanState::Done, &std::env::var("SystemRoot").unwrap()).is_some()
+        );
+
+        std::fs::remove_file(path.as_ref()).unwrap();
     }
 }
