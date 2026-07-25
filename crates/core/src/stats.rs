@@ -34,7 +34,7 @@ pub fn type_breakdown(
     let mut groups: HashMap<Option<ExtKey>, (u64, u64)> = HashMap::new();
     for_each_file(tree, root, hide_system, filter, |id, size| {
         let g = groups.entry(extension_key(tree.name(id))).or_default();
-        g.0 += size;
+        g.0 = g.0.saturating_add(size);
         g.1 += 1;
     });
 
@@ -56,7 +56,7 @@ pub fn type_breakdown(
             .then_with(|| ext_str(a).cmp(ext_str(b)))
     });
 
-    let total_bytes = all.iter().map(|t| t.bytes).sum();
+    let total_bytes = all.iter().fold(0u64, |sum, t| sum.saturating_add(t.bytes));
     let total_files = all.iter().map(|t| t.files).sum();
     TypeBreakdown {
         types: all,

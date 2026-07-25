@@ -119,7 +119,7 @@ pub fn build_overlay(tree: &Tree, query: &SearchQuery, hide_system: bool) -> Fil
         let node = tree.node(id);
         if exiting {
             if let Some(p) = node.parent() {
-                bytes[p as usize] += bytes[id as usize];
+                bytes[p as usize] = bytes[p as usize].saturating_add(bytes[id as usize]);
                 if visible[id as usize] {
                     visible[p as usize] = true;
                 }
@@ -140,7 +140,7 @@ pub fn build_overlay(tree: &Tree, query: &SearchQuery, hide_system: bool) -> Fil
             visible[id as usize] = true;
             bytes[id as usize] = node.size;
             if let Some(p) = node.parent() {
-                bytes[p as usize] += node.size;
+                bytes[p as usize] = bytes[p as usize].saturating_add(node.size);
                 visible[p as usize] = true;
             }
         }

@@ -153,8 +153,8 @@ pub fn assemble(
                 queue.push_back((c, id));
             } else {
                 stats.files += 1;
-                stats.bytes += size;
-                stats.allocated += alloc;
+                stats.bytes = stats.bytes.saturating_add(size);
+                stats.allocated = stats.allocated.saturating_add(alloc);
             }
 
             if batch.len() >= batch_size {

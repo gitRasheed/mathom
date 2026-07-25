@@ -125,7 +125,8 @@ fn fill_visible(tree: &Tree, root: NodeId, visible: &mut [u64]) {
         if id != root
             && let Some(parent) = node.parent()
         {
-            visible[parent as usize] += visible[id as usize];
+            visible[parent as usize] =
+                visible[parent as usize].saturating_add(visible[id as usize]);
         }
     }
 }

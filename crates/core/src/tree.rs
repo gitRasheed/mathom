@@ -175,8 +175,10 @@ impl Tree {
         let mut anc = parent;
         loop {
             let n = &mut self.nodes[anc as usize];
-            n.size -= removed.size;
-            n.allocated -= removed.allocated;
+            // Saturating to match `propagate`: once a total has clamped, a
+            // subtree can hold more than the ancestor it is being taken from.
+            n.size = n.size.saturating_sub(removed.size);
+            n.allocated = n.allocated.saturating_sub(removed.allocated);
             n.items -= node_count;
             if n.parent == NONE {
                 break;
@@ -322,11 +324,13 @@ impl TreeBuilder {
         self.tree
     }
 
+    /// Saturating: a crafted volume can claim sizes whose sum overflows u64, and
+    /// an inflated total beats aborting the scan.
     fn propagate(&mut self, mut id: u32, size: u64, allocated: u64) {
         loop {
             let n = &mut self.tree.nodes[id as usize];
-            n.size += size;
-            n.allocated += allocated;
+            n.size = n.size.saturating_add(size);
+            n.allocated = n.allocated.saturating_add(allocated);
             n.items += 1;
             if n.parent == NONE {
                 break;
@@ -452,6 +456,55 @@ mod tests {
         let tree = builder.finish();
         assert!(tree.node(1).flags.contains(EntryFlags::ERROR));
         assert!(tree.node(1).is_dir());
+    }
+
+    // A crafted volume can claim sizes whose sum overflows u64. Totals then stop
+    // being accurate, but the scan must not abort over it.
+    #[test]
+    fn aggregates_saturate_instead_of_overflowing() {
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
+        builder.add_batch(&batch(&[
+            ("huge", entry(1, 0, FILE, u64::MAX)),
+            ("more", entry(2, 0, FILE, u64::MAX)),
+        ]));
+        let tree = builder.finish();
+
+        assert_eq!(tree.node(0).size, u64::MAX);
+        assert_eq!(tree.node(0).allocated, u64::MAX);
+    }
+
+    // Once a total clamps, the bytes above u64::MAX are gone and no later
+    // delete can restore them, so deletion accounting is knowingly wrong from
+    // that point on. This pins the degradation: totals drift, nothing wraps,
+    // nothing panics. Underflow needs both deletes — a lone clamped subtree
+    // never exceeds the ancestor it came from.
+    #[test]
+    fn deleting_from_a_saturated_total_degrades_without_underflowing() {
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&batch(&[("root", entry(0, 0, DIR, 0))]));
+        builder.add_batch(&batch(&[("dir", entry(1, 0, DIR, 0))]));
+        builder.add_batch(&batch(&[
+            ("huge", entry(2, 1, FILE, u64::MAX)),
+            ("more", entry(3, 1, FILE, u64::MAX)),
+        ]));
+        builder.add_batch(&batch(&[("small", entry(4, 0, FILE, 10))]));
+        let mut tree = builder.finish();
+        assert_eq!(tree.node(0).size, u64::MAX, "the root clamped");
+
+        assert!(tree.remove_subtree(4).is_some());
+        assert_eq!(
+            tree.node(0).size,
+            u64::MAX - 10,
+            "already inaccurate: `dir` alone still holds u64::MAX"
+        );
+
+        assert!(tree.remove_subtree(1).is_some());
+        assert_eq!(
+            tree.node(0).size,
+            0,
+            "clamped, where plain subtraction would wrap to a colossal total"
+        );
     }
 
     #[test]

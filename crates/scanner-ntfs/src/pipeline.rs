@@ -155,7 +155,7 @@ impl Sweep {
             self.torn += out.torn;
             counts.files += out.counts.files;
             counts.dirs += out.counts.dirs;
-            counts.bytes += out.counts.bytes;
+            counts.bytes = counts.bytes.saturating_add(out.counts.bytes);
         }
         counts
     }
@@ -211,7 +211,8 @@ fn place(facts: RecordFacts, arena_idx: u32, slot: &mut Slot, out: &mut TaskOut)
         out.counts.dirs += 1;
     } else {
         out.counts.files += 1;
-        out.counts.bytes += facts.logical;
+        // Disk-supplied sizes are unrestricted u64; clamp rather than wrap.
+        out.counts.bytes = out.counts.bytes.saturating_add(facts.logical);
     }
     *slot = s;
 }
@@ -335,6 +336,37 @@ mod tests {
                 single.name(&single.records[i])
             );
         }
+    }
+
+    #[test]
+    fn hostile_sizes_saturate_the_byte_counter() {
+        let img = image(
+            1024,
+            vec![
+                (5, root_dir()),
+                (
+                    16,
+                    RecordBuilder::file()
+                        .name(5, 5, 1, "a.bin")
+                        .data_nonresident(u64::MAX, 4096),
+                ),
+                (
+                    // A different TASK_RECORDS chunk, so this covers the fold
+                    // across rayon tasks as well as the per-task tally.
+                    TASK_RECORDS as u64 + 6,
+                    RecordBuilder::file()
+                        .name(5, 5, 1, "b.bin")
+                        .data_nonresident(u64::MAX, 4096),
+                ),
+            ],
+        );
+        let (_, counts) = sweep_image(img, 1024);
+        assert_eq!(
+            counts.bytes,
+            u64::MAX,
+            "the sum clamps rather than wrapping"
+        );
+        assert_eq!(counts.files, 2, "both records still land");
     }
 
     #[test]

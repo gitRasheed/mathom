@@ -115,7 +115,7 @@ fn scan_inner(
                     let _ = empty_tx.send(buf); // reader gone = fine
                     progress.files += counts.files;
                     progress.dirs += counts.dirs;
-                    progress.bytes += counts.bytes;
+                    progress.bytes = progress.bytes.saturating_add(counts.bytes);
                     // Live counters only make sense for whole-volume scans;
                     // subtree totals arrive with Done.
                     if whole_volume && last_tick.elapsed() >= PROGRESS_INTERVAL {
