@@ -85,6 +85,19 @@ fn overlay_for(
     Some(overlay)
 }
 
+/// A pure `ext:` query is the type panel's own facet, so its rows must ignore
+/// it — filtering to one type would otherwise collapse the list to that single
+/// row and there would be no way to pick another. Totals and largest files
+/// stay filtered. Classified here rather than in the front end so the grammar
+/// has one owner.
+fn filters_by_extension_only(filter: Option<&str>) -> bool {
+    let Some(text) = filter.map(str::trim).filter(|text| !text.is_empty()) else {
+        return false;
+    };
+    let query = SearchQuery::parse(text);
+    !query.exts.is_empty() && query.name_terms.is_empty() && query.min_size == 0
+}
+
 #[derive(Default)]
 struct Progress {
     files: u64,
@@ -410,16 +423,20 @@ pub fn get_type_stats(
 
     let overlay = overlay_for(&session, tree, filter.as_deref(), hide_system);
     let visible = overlay.as_deref().map(|o| o.visible.as_slice());
-    let bd = mathom_core::stats::type_breakdown(tree, root_id, hide_system, visible);
-    let subtree_total = bd.total_bytes;
+    let filtered = mathom_core::stats::type_breakdown(tree, root_id, hide_system, visible);
+    let (total_bytes, total_files) = (filtered.total_bytes, filtered.total_files);
     let top_files =
         mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system, visible)
             .into_iter()
-            .map(|id| make_row(tree, id, subtree_total))
+            .map(|id| make_row(tree, id, total_bytes))
             .collect();
+    let types = if filters_by_extension_only(filter.as_deref()) {
+        mathom_core::stats::type_breakdown(tree, root_id, hide_system, None).types
+    } else {
+        filtered.types
+    };
     Ok(TypePanelData {
-        types: bd
-            .types
+        types: types
             .iter()
             .map(|t| TypeStatDto {
                 ext: t.ext.as_ref().map_or("", |k| k.as_str()).to_string(),
@@ -428,8 +445,8 @@ pub fn get_type_stats(
                 files: t.files,
             })
             .collect(),
-        total_bytes: bd.total_bytes,
-        total_files: bd.total_files,
+        total_bytes,
+        total_files,
         top_files,
     })
 }
@@ -929,6 +946,23 @@ fn sort_rows(rows: &mut [Row], key: &str, descending: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_pure_extension_query_is_the_type_panel_facet() {
+        assert!(filters_by_extension_only(Some("ext:mkv")));
+        assert!(filters_by_extension_only(Some("ext:mp4,mkv")));
+        assert!(filters_by_extension_only(Some("  ext:pdf  ")));
+        // A repeated `ext:` is still the facet — the parser keeps the last one.
+        assert!(filters_by_extension_only(Some("ext:mkv ext:mp4")));
+
+        // Anything narrower than the facet must still narrow the rows.
+        assert!(!filters_by_extension_only(Some("ext:mkv >100mb")));
+        assert!(!filters_by_extension_only(Some("ext:mkv holiday")));
+        assert!(!filters_by_extension_only(Some("holiday")));
+        assert!(!filters_by_extension_only(Some(">1gb")));
+        assert!(!filters_by_extension_only(Some("")));
+        assert!(!filters_by_extension_only(None));
+    }
 
     #[test]
     fn deletes_are_blocked_while_scanning() {
