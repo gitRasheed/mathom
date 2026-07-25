@@ -21,7 +21,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::{Owned, PCWSTR};
 
-use crate::boot::{Geometry, geometry_fits_device, parse_boot_sector, plan_mft_read};
+use crate::boot::{
+    Geometry, geometry_fits_device, parse_boot_sector, plan_mft_read, record_buffer_len,
+};
 use crate::record::parse_record0;
 use crate::runs::Extent;
 
@@ -307,7 +309,10 @@ pub fn map_mft(volume: &Volume, mount: &str) -> Result<MftMap, String> {
         return Err("unsupported geometry: cluster smaller than FILE record".into());
     }
 
-    let mut rec0 = AlignedBuf::new(4096);
+    // Sized from the declared record size: the boot sector may legally ask for
+    // records larger than a page, and a fixed page-sized buffer would both
+    // under-read the record and panic on the slice below.
+    let mut rec0 = AlignedBuf::new(record_buffer_len(geometry.record_size));
     volume.read_at(geometry.mft_byte_offset(), rec0.as_mut_slice())?;
     let rec0_slice = &mut rec0.as_mut_slice()[..geometry.record_size as usize];
     let (extents, data_size) = match parse_record0(rec0_slice) {

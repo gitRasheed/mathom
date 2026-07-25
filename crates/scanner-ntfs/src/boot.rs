@@ -26,6 +26,13 @@ pub struct MftPlan {
     pub total_records: u32,
 }
 
+/// Bytes to allocate to read one FILE record. The boot sector may declare
+/// records larger than a page, and unbuffered volume reads need 4 KiB-aligned
+/// buffers.
+pub fn record_buffer_len(record_size: u32) -> usize {
+    (record_size as usize).next_multiple_of(4096)
+}
+
 pub fn geometry_fits_device(geometry: &Geometry, device_bytes: u64) -> Result<(), ParseError> {
     match geometry
         .total_clusters
@@ -288,6 +295,35 @@ mod tests {
             parse_boot_sector(&b),
             Err(ParseError("$MFT cluster out of range"))
         );
+    }
+
+    #[test]
+    fn accepts_eight_kib_clusters_with_one_record_per_cluster() {
+        // Legal geometry that declares FILE records larger than a page, which
+        // is what the record-0 read buffer has to accommodate.
+        let mut b = typical_boot();
+        b[13] = 16; // 16 sectors per cluster = 8 KiB clusters
+        b[0x40] = 1; // one cluster per FILE record
+        let g = parse_boot_sector(&b).unwrap();
+        assert_eq!(g.cluster_size, 8192);
+        assert_eq!(g.record_size, 8192);
+    }
+
+    #[test]
+    fn record_buffer_holds_a_whole_record_at_every_accepted_size() {
+        // parse_boot_sector accepts powers of two from 512 to 65536.
+        for shift in 9..=16 {
+            let record_size = 1u32 << shift;
+            let len = record_buffer_len(record_size);
+            assert!(
+                len >= record_size as usize,
+                "{record_size}-byte records need at least that much buffer, got {len}"
+            );
+            assert!(
+                len.is_multiple_of(4096),
+                "unbuffered reads need 4 KiB-aligned buffers, got {len}"
+            );
+        }
     }
 
     #[test]
