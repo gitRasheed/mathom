@@ -18,6 +18,10 @@ pub struct Node {
     next_sibling: u32,
     /// Directories: descendant count. Files: 0.
     pub items: u32,
+    /// With `allocated`: own bytes plus every descendant's, maintained by
+    /// `TreeBuilder::propagate` and `remove_subtree`. The authoritative subtree
+    /// total — re-summing leaves silently assumes directories carry no bytes
+    /// of their own.
     pub size: u64,
     pub allocated: u64,
     pub mtime: i64,
@@ -182,9 +186,16 @@ impl Tree {
         Some(removed)
     }
 
-    /// Iteratively vacates the subtree and tallies leaf bytes.
+    /// Iteratively vacates the subtree: bytes come from the root's aggregate
+    /// (what `remove_subtree` subtracts back out of its ancestors), counts
+    /// from the walk.
     fn detach_subtree(&mut self, id: NodeId) -> Removed {
-        let mut removed = Removed::default();
+        let root = self.nodes[id as usize];
+        let mut removed = Removed {
+            size: root.size,
+            allocated: root.allocated,
+            ..Removed::default()
+        };
         let mut stack = vec![id];
         while let Some(cur) = stack.pop() {
             let n = self.nodes[cur as usize];
@@ -197,11 +208,14 @@ impl Tree {
                 removed.dirs += 1;
             } else {
                 removed.files += 1;
-                removed.size += n.size;
-                removed.allocated += n.allocated;
             }
             self.nodes[cur as usize] = Node::VACANT;
         }
+        debug_assert_eq!(
+            removed.nodes(),
+            root.items as u64 + 1,
+            "subtree node count disagrees with the propagated items counter"
+        );
         removed
     }
 }
