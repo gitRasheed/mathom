@@ -29,6 +29,8 @@ export interface TypePanelProps {
   onSelectFile: (row: Row) => void;
   /** Extensions in the active `ext:` filter — their rows get a tint. */
   activeExts: string[];
+  /** False while scanning: filtering is post-scan only, as in the search box. */
+  canFilter: boolean;
   /** Click = filter to this type; shift-click (additive) = add/remove it. */
   onFilterType: (ext: string, additive: boolean) => void;
 }
@@ -42,6 +44,7 @@ export function TypePanel({
   filter,
   onSelectFile,
   activeExts,
+  canFilter,
   onFilterType,
 }: TypePanelProps) {
   const [data, setData] = useState<TypePanelData | null>(null);
@@ -52,15 +55,13 @@ export function TypePanel({
     if (generation === 0) return;
     const seq = ++seqRef.current;
     lastFetchRef.current = performance.now();
-    const full = api.getTypeStats(generation, rootId, hideSystem, filter);
-    // Facet self-exclusion: the type rows ignore a pure type filter; totals/largest stay filtered.
-    const picker =
-      activeExts.length > 0
-        ? api.getTypeStats(generation, rootId, hideSystem, null)
-        : full;
-    Promise.all([full, picker])
-      .then(([f, p]) => {
-        if (seq === seqRef.current) setData({ ...f, types: p.types });
+    // Facet self-exclusion is the backend's call: a pure `ext:` filter narrows
+    // the totals and largest files but leaves every type row listed, so the
+    // picker never collapses to the one type you just clicked.
+    api
+      .getTypeStats(generation, rootId, hideSystem, filter)
+      .then((d) => {
+        if (seq === seqRef.current) setData(d);
       })
       .catch((e) => {
         // The tree can still be empty at scan start; ticks retry naturally.
@@ -68,7 +69,7 @@ export function TypePanel({
           reportUnlessStale("loading file types", e);
         }
       });
-  }, [generation, rootId, hideSystem, filter, activeExts]);
+  }, [generation, rootId, hideSystem, filter]);
 
   useEffect(() => {
     setData(null);
@@ -117,6 +118,7 @@ export function TypePanel({
               types: data.types,
               totalBytes: data.totalBytes,
               activeExts,
+              canFilter,
               onFilterType,
             }}
             className="h-full"
@@ -153,6 +155,7 @@ interface TypeRowsProps {
   types: TypeStat[];
   totalBytes: number;
   activeExts: string[];
+  canFilter: boolean;
   onFilterType: (ext: string, additive: boolean) => void;
 }
 
@@ -162,11 +165,14 @@ function TypeRow({
   types,
   totalBytes,
   activeExts,
+  canFilter,
   onFilterType,
 }: RowComponentProps<TypeRowsProps>) {
   const t = types[index];
-  // "(no extension)" can't be expressed in the search grammar — not clickable.
-  const clickable = t.ext !== "";
+  // "(no extension)" can't be expressed in the search grammar — not clickable,
+  // and neither is anything mid-scan, when a filter would freeze at whatever
+  // the tree happened to hold.
+  const clickable = canFilter && t.ext !== "";
   const active = activeExts.includes(t.ext);
   return (
     <div

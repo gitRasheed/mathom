@@ -439,6 +439,7 @@ export default function App() {
               filter={scan.filter}
               onSelectFile={handlePanelFileSelect}
               activeExts={activeExts}
+              canFilter={!scan.scanning && generation > 0}
               onFilterType={handleFilterType}
             />
           )}
