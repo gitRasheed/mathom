@@ -101,19 +101,33 @@ fn layout_impl(
     out
 }
 
-fn fill_visible(tree: &Tree, id: NodeId, visible: &mut [u64]) -> u64 {
-    let node = tree.node(id);
-    let size = if node.flags.contains(EntryFlags::SYSTEM) {
-        0
-    } else if node.is_dir() {
-        tree.children(id)
-            .map(|c| fill_visible(tree, c, visible))
-            .sum()
-    } else {
-        node.size
-    };
-    visible[id as usize] = size;
-    size
+/// Fills `visible` with subtree sizes that omit SYSTEM entries, for the
+/// subtree under `root` only. SYSTEM subtrees are never visited, so `visible`
+/// must arrive zeroed. Explicit stack: tree depth is unbounded.
+fn fill_visible(tree: &Tree, root: NodeId, visible: &mut [u64]) {
+    // (id, exiting): a dir is pushed twice — once to expand, once to fold its
+    // finished total into its parent. Mirrors `search::build_overlay`.
+    let mut stack = vec![(root, false)];
+    while let Some((id, exiting)) = stack.pop() {
+        let node = tree.node(id);
+        if !exiting {
+            if node.flags.contains(EntryFlags::SYSTEM) {
+                continue;
+            }
+            if node.is_dir() {
+                stack.push((id, true));
+                stack.extend(tree.children(id).map(|c| (c, false)));
+                continue;
+            }
+            visible[id as usize] = node.size;
+        }
+        // The traversal root's parent lies outside the laid-out subtree.
+        if id != root
+            && let Some(parent) = node.parent()
+        {
+            visible[parent as usize] += visible[id as usize];
+        }
+    }
 }
 
 fn effective_size(tree: &Tree, id: NodeId, visible: Option<&[u64]>) -> u64 {
@@ -606,6 +620,62 @@ mod tests {
         assert!(hidden.iter().all(|r| r.id != 2), "system file hidden");
         // "a" now fills the whole viewport instead of half.
         assert!((area(&rect_of(&hidden, 1)) - 10_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn visible_sizes_stay_zero_under_a_system_directory() {
+        // root / sysdir(SYSTEM) { deep { g 9999 } } + keep 100
+        let sys_dir = DIR.union(EntryFlags::SYSTEM);
+        let mut b = EntryBatch::default();
+        b.push("root", entry(0, 0, DIR, 0));
+        b.push("sysdir", entry(1, 0, sys_dir, 0));
+        b.push("deep", entry(2, 1, DIR, 0));
+        b.push("g", entry(3, 2, FILE, 9999));
+        b.push("keep", entry(4, 0, FILE, 100));
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&b);
+        let tree = builder.finish();
+
+        let mut visible = vec![0u64; tree.len()];
+        fill_visible(&tree, 0, &mut visible);
+
+        assert_eq!(visible[0], 100, "root counts only the non-system file");
+        assert_eq!(visible[1], 0);
+        assert_eq!(visible[2], 0, "descendants of a system dir stay zero");
+        assert_eq!(visible[3], 0);
+        assert_eq!(visible[4], 100);
+    }
+
+    #[test]
+    fn visible_sizes_never_write_outside_the_traversal_subtree() {
+        // root { a { f 70 } + b 900 }, filled from `a`
+        let mut b = EntryBatch::default();
+        b.push("root", entry(0, 0, DIR, 0));
+        b.push("a", entry(1, 0, DIR, 0));
+        b.push("f", entry(2, 1, FILE, 70));
+        b.push("b", entry(3, 0, FILE, 900));
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&b);
+        let tree = builder.finish();
+
+        let mut visible = vec![0u64; tree.len()];
+        fill_visible(&tree, 1, &mut visible);
+
+        assert_eq!(visible[1], 70, "the traversal root gets its nested total");
+        assert_eq!(visible[2], 70);
+        assert_eq!(visible[0], 0, "the parent outside the subtree is untouched");
+        assert_eq!(visible[3], 0);
+    }
+
+    #[test]
+    fn a_file_as_traversal_root_keeps_its_own_size() {
+        let tree = flat_tree(&[("a.txt", 42)]);
+
+        let mut visible = vec![0u64; tree.len()];
+        fill_visible(&tree, 1, &mut visible);
+
+        assert_eq!(visible[1], 42);
+        assert_eq!(visible[0], 0);
     }
 
     #[test]
