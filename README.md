@@ -12,6 +12,10 @@ UI for them yet.
 
 ## Install
 
+```powershell
+winget install mathom
+```
+
 Download the MSI, setup.exe, or portable zip from [Releases](../../releases).
 
 Not code-signed yet, so SmartScreen warns on first run: "More info", then
