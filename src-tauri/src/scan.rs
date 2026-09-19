@@ -168,6 +168,9 @@ pub struct TreemapRectDto {
     depth: u8,
     is_dir: bool,
     category: u8,
+    /// What the block is called; the canvas draws it inside the rect.
+    name: String,
+    size: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -338,6 +341,17 @@ pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Resu
     Ok(tree.path(id))
 }
 
+/// Legibility floor for a treemap rect, in CSS pixels: below this on either
+/// side the block is not drawn, so the map never fills with specks. Mirrored
+/// as `TREEMAP_MIN_SIDE_PX` in `ui/src/lib/prefs.ts`.
+const TREEMAP_MIN_SIDE_PX: f32 = 6.0;
+
+/// The strip a directory reserves at the top of its interior for its label —
+/// and therefore the height the UI has to draw that label in. Mirrored as
+/// `TREEMAP_LABEL_PX` in `ui/src/lib/prefs.ts`: the two have to agree or the
+/// text lands on the children instead of above them.
+const TREEMAP_LABEL_PX: f32 = 15.0;
+
 #[tauri::command(async)]
 pub fn get_treemap(
     state: State<'_, AppState>,
@@ -358,8 +372,9 @@ pub fn get_treemap(
         return Ok(Vec::new());
     }
     let opts = TreemapOptions {
-        min_area_px: 3.0,
+        min_side_px: TREEMAP_MIN_SIDE_PX,
         padding_px: 1.0,
+        label_px: TREEMAP_LABEL_PX,
         max_depth: 24,
         hide_system,
     };
@@ -371,6 +386,10 @@ pub fn get_treemap(
         Some(o) => treemap::layout_with_filter(tree, root_id, viewport, &opts, &o.bytes),
         None => treemap::layout(tree, root_id, viewport, &opts),
     };
+    // The label's text rides along with the geometry: a rect the user can see
+    // is a rect they can read, and asking per node would be one round trip per
+    // rectangle. The culling above is what keeps the payload honest — what is
+    // sent is roughly what fits on screen, not the whole subtree.
     Ok(rects
         .into_iter()
         .map(|r| TreemapRectDto {
@@ -382,6 +401,8 @@ pub fn get_treemap(
             depth: r.depth,
             is_dir: r.is_dir,
             category: r.category,
+            name: tree.name(r.id).to_string(),
+            size: tree.node(r.id).size,
         })
         .collect())
 }
