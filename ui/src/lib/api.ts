@@ -46,6 +46,9 @@ export interface TreemapRect {
   depth: number;
   isDir: boolean;
   category: number;
+  /** Drawn inside the block when the view asks for labels. */
+  name: string;
+  size: number;
 }
 
 export interface Crumb {
@@ -159,6 +162,8 @@ export const api = {
     height: number,
     hideSystem: boolean,
     filter: string | null,
+    forceOpen: number | null,
+    maxDepth: number | null,
   ) =>
     invoke<TreemapRect[]>("get_treemap", {
       generation,
@@ -167,6 +172,8 @@ export const api = {
       height,
       hideSystem,
       filter,
+      forceOpen,
+      maxDepth,
     }),
   getTypeStats: (
     generation: number,

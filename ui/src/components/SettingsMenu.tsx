@@ -5,6 +5,7 @@ import {
   type ThemePref,
   accentSwatch,
 } from "../lib/theme";
+import { DEPTH_OPTIONS, type DepthPref } from "../lib/prefs";
 import { PaletteIcon } from "./icons";
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
@@ -15,18 +16,26 @@ const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
 
 interface SettingsMenuProps {
   hideSystem: boolean;
+  showLabels: boolean;
+  depth: DepthPref;
   themePref: ThemePref;
   accent: AccentName;
   onToggleHideSystem: () => void;
+  onToggleShowLabels: () => void;
+  onDepth: (depth: DepthPref) => void;
   onThemePref: (pref: ThemePref) => void;
   onAccent: (accent: AccentName) => void;
 }
 
 export function SettingsMenu({
   hideSystem,
+  showLabels,
+  depth,
   themePref,
   accent,
   onToggleHideSystem,
+  onToggleShowLabels,
+  onDepth,
   onThemePref,
   onAccent,
 }: SettingsMenuProps) {
@@ -80,6 +89,43 @@ export function SettingsMenu({
             />
             Hide system files
           </label>
+          <label
+            className="mt-1.5 flex cursor-pointer items-center gap-2 text-[12px] text-ink-2"
+            title="Write each treemap block's name and size inside it"
+          >
+            <input
+              type="checkbox"
+              className="accent-accent"
+              checked={showLabels}
+              onChange={onToggleShowLabels}
+            />
+            Show names in treemap
+          </label>
+          <div className="mt-3 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
+            Depth
+          </div>
+          <div className="mt-1.5 flex rounded-md border border-edge p-0.5">
+            {DEPTH_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                onClick={() => onDepth(opt.value)}
+                title={
+                  opt.value === "auto"
+                    ? "As deep as the pixels are worth — folders fold when nothing inside them would be readable"
+                    : opt.value === "all"
+                      ? "Every level that fits, and nothing folds"
+                      : `Exactly ${opt.label} level${opt.label === "1" ? "" : "s"}`
+                }
+                className={`h-6 flex-1 rounded text-[12px] ${
+                  depth === opt.value
+                    ? "bg-raised text-ink"
+                    : "text-ink-4 hover:text-ink-2"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <div className="mt-3 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
             Theme
           </div>

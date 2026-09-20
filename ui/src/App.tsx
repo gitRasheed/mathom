@@ -17,6 +17,7 @@ import {
   type TreemapRect,
 } from "./lib/api";
 import { copyText } from "./lib/clipboard";
+import { layoutDepth } from "./lib/prefs";
 import { onUiError, reportUiError, reportUnlessStale } from "./lib/errors";
 
 const TREE_PANE_MIN = 320;
@@ -123,8 +124,10 @@ export default function App() {
 
   const handleTreemapSelect = useCallback(
     (rect: TreemapRect) => {
+      // Selecting only. Zooming is the treemap's own decision now — a click on
+      // a folder it drew as a plate opens that folder instead, and comes back
+      // through `onNavigate` if it turns out to want the whole view.
       select(rect.id);
-      if (rect.isDir) setViewRootId(rect.id);
       if (generation === 0) return;
       api
         .getAncestors(generation, rect.id)
@@ -357,6 +360,8 @@ export default function App() {
         viewRootId={viewRootId}
         startError={scan.startError}
         hideSystem={scan.hideSystem}
+        showLabels={scan.showLabels}
+        depth={scan.depth}
         filter={scan.filter}
         typePanelOpen={typePanelOpen}
         themePref={theme.pref}
@@ -364,6 +369,8 @@ export default function App() {
         onScan={handleScan}
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
+        onToggleShowLabels={scan.toggleShowLabels}
+        onDepth={scan.setDepth}
         onToggleTypePanel={() => setTypePanelOpen((v) => !v)}
         onSearchSelect={handleSearchSelect}
         onApplyFilter={scan.setFilter}
@@ -422,6 +429,8 @@ export default function App() {
             themeRev={theme.themeRev}
             hideSystem={scan.hideSystem}
             filter={scan.filter}
+            labels={scan.showLabels}
+            maxDepth={layoutDepth(scan.depth)}
             selected={selected}
             hoveredId={hoveredId}
             onSelect={handleTreemapSelect}

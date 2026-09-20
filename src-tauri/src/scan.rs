@@ -168,6 +168,9 @@ pub struct TreemapRectDto {
     depth: u8,
     is_dir: bool,
     category: u8,
+    /// What the block is called; the canvas draws it inside the rect.
+    name: String,
+    size: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -338,6 +341,21 @@ pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Resu
     Ok(tree.path(id))
 }
 
+/// The deepest the adaptive layout will go. Only a backstop — the legibility
+/// rules stop it long before this — but the tree's depth is unbounded, so
+/// something has to. Mirrored as `MAX_TREEMAP_DEPTH` in `ui/src/lib/prefs.ts`.
+const MAX_TREEMAP_DEPTH: u8 = 24;
+
+/// Legibility floor for a treemap rect, in CSS pixels. A child whose share of
+/// its directory falls under this is drawn at this size anyway — a directory
+/// has to tile edge to edge, or the small stuff reads as a hole rather than as
+/// small stuff. What no longer fits at this size is dropped smallest first, so
+/// the map still never turns into a mosaic of specks.
+const TREEMAP_MIN_SIDE_PX: f32 = 6.0;
+
+// The argument list mirrors the UI's query; grouping it into a struct would
+// only move the same list one level down.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command(async)]
 pub fn get_treemap(
     state: State<'_, AppState>,
@@ -347,6 +365,8 @@ pub fn get_treemap(
     height: f32,
     hide_system: bool,
     filter: Option<String>,
+    force_open: Option<NodeId>,
+    max_depth: Option<u8>,
 ) -> Result<Vec<TreemapRectDto>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -358,19 +378,36 @@ pub fn get_treemap(
         return Ok(Vec::new());
     }
     let opts = TreemapOptions {
-        min_area_px: 3.0,
-        padding_px: 1.0,
-        max_depth: 24,
+        min_side_px: TREEMAP_MIN_SIDE_PX,
+        // The labels the UI can draw are a *view* of this geometry, never an
+        // input to it: nothing here knows whether they are on, so switching
+        // them cannot move a single block.
+        //
+        // `max_depth` is the Depth setting: absent means Auto, where the
+        // pixels decide how deep to go; present means the original fixed
+        // layout, which takes every level the cap allows and asks nothing.
+        max_depth: max_depth.unwrap_or(MAX_TREEMAP_DEPTH),
+        adaptive_depth: max_depth.is_none(),
         hide_system,
     };
     let viewport = Viewport {
         w: width,
         h: height,
     };
+    // `force_open` names a directory the user asked to see inside of. One that
+    // is not in this subtree, or no longer names a live directory, opens
+    // nothing rather than erroring: a stale id is what an accordion looks like
+    // from the other side of a delete, and it should close by itself.
     let rects = match overlay_for(&session, tree, filter.as_deref(), hide_system) {
-        Some(o) => treemap::layout_with_filter(tree, root_id, viewport, &opts, &o.bytes),
-        None => treemap::layout(tree, root_id, viewport, &opts),
+        Some(o) => {
+            treemap::layout_with_force(tree, root_id, viewport, &opts, Some(&o.bytes), force_open)
+        }
+        None => treemap::layout_with_force(tree, root_id, viewport, &opts, None, force_open),
     };
+    // The label's text rides along with the geometry: a rect the user can see
+    // is a rect they can read, and asking per node would be one round trip per
+    // rectangle. The floor in `opts` is what keeps the payload honest — what
+    // is sent is roughly what fits on screen, not the whole subtree.
     Ok(rects
         .into_iter()
         .map(|r| TreemapRectDto {
@@ -382,6 +419,8 @@ pub fn get_treemap(
             depth: r.depth,
             is_dir: r.is_dir,
             category: r.category,
+            name: tree.name(r.id).to_string(),
+            size: tree.node(r.id).size,
         })
         .collect())
 }

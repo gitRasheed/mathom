@@ -9,8 +9,7 @@
   --color-raised: #27272a; /* selection, hover on panel surfaces */
   --color-edge: #27272a;
   --color-edge-strong: #3f3f46;
-  --color-plate: #30323a; /* treemap directory plate */
-  --color-plate-grain: #454a57; /* dots on bare plate: culled-content texture */
+  --color-plate: #30323a; /* the map's own surface, behind every block */
 
   --color-ink: #f4f4f5;
   --color-ink-2: #d4d4d8;
@@ -45,7 +44,6 @@
   --color-edge: #e4e4e7;
   --color-edge-strong: #d4d4d8;
   --color-plate: #dcdce0;
-  --color-plate-grain: #bfc0c8;
 
   --color-ink: #18181b;
   --color-ink-2: #3f3f46;
