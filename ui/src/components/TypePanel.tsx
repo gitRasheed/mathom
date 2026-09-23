@@ -107,7 +107,7 @@ export function TypePanel({
               Appears during a scan
             </div>
           ) : null
-        ) : data.totalFiles === 0 ? (
+        ) : data.types.length === 0 ? (
           <div className="px-3 py-2 text-xs text-ink-5">No files here</div>
         ) : (
           <List
@@ -116,7 +116,10 @@ export function TypePanel({
             rowHeight={TYPE_ROW_HEIGHT}
             rowProps={{
               types: data.types,
-              totalBytes: data.totalBytes,
+              displayedBytes: data.types.reduce(
+                (sum, type) => sum + type.bytes,
+                0,
+              ),
               activeExts,
               canFilter,
               onFilterType,
@@ -153,7 +156,7 @@ export function TypePanel({
 
 interface TypeRowsProps {
   types: TypeStat[];
-  totalBytes: number;
+  displayedBytes: number;
   activeExts: string[];
   canFilter: boolean;
   onFilterType: (ext: string, additive: boolean) => void;
@@ -163,7 +166,7 @@ function TypeRow({
   index,
   style,
   types,
-  totalBytes,
+  displayedBytes,
   activeExts,
   canFilter,
   onFilterType,
@@ -202,7 +205,7 @@ function TypeRow({
         {formatBytes(t.bytes)}
       </span>
       <span className="tnum w-9 shrink-0 text-right text-[11px] text-ink-5">
-        {formatPercent(totalBytes > 0 ? t.bytes / totalBytes : 0)}
+        {formatPercent(displayedBytes > 0 ? t.bytes / displayedBytes : 0)}
       </span>
     </div>
   );

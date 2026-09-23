@@ -399,8 +399,6 @@ pub struct TypeStatDto {
 #[serde(rename_all = "camelCase")]
 pub struct TypePanelData {
     types: Vec<TypeStatDto>,
-    total_bytes: u64,
-    total_files: u64,
     top_files: Vec<Row>,
 }
 
@@ -424,7 +422,7 @@ pub fn get_type_stats(
     let overlay = overlay_for(&session, tree, filter.as_deref(), hide_system);
     let visible = overlay.as_deref().map(|o| o.visible.as_slice());
     let filtered = mathom_core::stats::type_breakdown(tree, root_id, hide_system, visible);
-    let (total_bytes, total_files) = (filtered.total_bytes, filtered.total_files);
+    let total_bytes = filtered.total_bytes;
     let top_files =
         mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system, visible)
             .into_iter()
@@ -445,8 +443,6 @@ pub fn get_type_stats(
                 files: t.files,
             })
             .collect(),
-        total_bytes,
-        total_files,
         top_files,
     })
 }

@@ -201,7 +201,13 @@ export default function App() {
   // Only a pure `ext:` filter is treated as the active type list; other queries start fresh.
   const { filter } = scan;
   const activeExts = useMemo(
-    () => filter?.match(/^ext:([^\s]+)$/)?.[1].split(",") ?? [],
+    () =>
+      filter
+        ?.trim()
+        .match(/^ext:([^\s]+)$/)?.[1]
+        .split(",")
+        .map((ext) => ext.replace(/^\.+/, "").toLowerCase())
+        .filter(Boolean) ?? [],
     [filter],
   );
 

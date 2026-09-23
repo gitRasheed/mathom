@@ -81,8 +81,6 @@ export interface TypeStat {
 export interface TypePanelData {
   /** Every extension in the subtree, largest first. */
   types: TypeStat[];
-  totalBytes: number;
-  totalFiles: number;
   topFiles: Row[];
 }
 
