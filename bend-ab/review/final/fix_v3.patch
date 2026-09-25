@@ -1,0 +1,123 @@
+diff --git a/bend2/comp.ts b/bend2/comp.ts
+index fb8d382c..6aee0aa4 100644
+--- a/bend2/comp.ts
++++ b/bend2/comp.ts
+@@ -520,6 +520,17 @@ function nat_chk(n) {
+   return n;
+ }
+ 
++// The sign of d * 10^k - |x| for a finite double x, exactly: |x| is m * 2^p
++function dec_cmp(d, k, x) {
++  const b = new BigUint64Array(new Float64Array([Math.abs(x)]).buffer)[0];
++  const e = Number(b >> 52n);
++  const m = e === 0 ? b : b & 0xfffffffffffffn | 1n << 52n;
++  const p = (e === 0 ? 1 : e) - 1075;
++  const a = d * 10n ** BigInt(Math.max(k, 0)) << BigInt(Math.max(-p, 0));
++  const c = m * 10n ** BigInt(Math.max(-k, 0)) << BigInt(Math.max(p, 0));
++  return a > c ? 1 : a < c ? -1 : 0;
++}
++
+ function f32_show(x) {
+   if (x !== x) {
+     return "nan";
+@@ -528,11 +539,23 @@ function f32_show(x) {
+     return x < 0 ? "-inf"
+       : x === 0 ? "-0" : "inf";
+   }
+-  let s = "x";
+-  for (let p = 1; p <= 9 && Math.fround(Number(s)) !== x; p += 1) {
+-    s = String(Number(x.toExponential(p - 1)));
++  let q = -1;
++  let t = "x";
++  while (q < 8 && Math.fround(Number(t)) !== x) {
++    q += 1;
++    t = x.toExponential(q);
+   }
+-  return s;
++  // toExponential rounds a decimal tie up, the C lane's printf to even: an odd
++  // last digit steps down when the value is exactly half a unit below it
++  const [man, ex] = t.split("e");
++  if (/[13579]$/.test(man) && /5e/.test(x.toExponential(q + 1))
++    && Number(x.toExponential(q + 1)) === x) {
++    const n = BigInt(man.replace(/[-.]/g, ""));
++    if (dec_cmp(2n * n - 1n, Number(ex) - q, 2 * x) === 0) {
++      t = (x < 0 ? "-" : "") + (n - 1n) + "e" + (Number(ex) - q);
++    }
++  }
++  return String(Number(t));
+ }
+ 
+ function f32_bits(x) {
+@@ -544,9 +567,25 @@ function f32_from_bits(u) {
+ }
+ 
+ function f32_read(s) {
+-  const re = /^\s*[+-]?((\d+\.?\d*|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
++  const re = /^[ \t\n\v\f\r]*[+-]?((\d+\.?\d*|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
++  if (!re.test(s)) {
++    return {$: "None"};
++  }
++  // fround after Number rounds twice: on an f32 midpoint (the overflow
++  // threshold 2^128 - 2^103 included) the decimal decides, as strtof does
+   const v = Number(s.replace(/inf\w*/i, "Infinity"));
+-  return re.test(s) ? {$: "Some", value: Math.fround(v)} : {$: "None"};
++  const f = Math.fround(v);
++  if (f === v || !Number.isFinite(v)) {
++    return {$: "Some", value: f};
++  }
++  const g = Math.min(Math.abs(f), 2 ** 128);
++  const h = f32_from_bits(f32_bits(g) + (g < Math.abs(v) ? 1 : -1));
++  if (Math.abs(v) !== (g + h) / 2) {
++    return {$: "Some", value: f};
++  }
++  const [, int, frac, exp] = /^[+-]?(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s.trim());
++  const c = dec_cmp(BigInt(int + frac), Number(exp ?? 0) - frac.length, v);
++  return {$: "Some", value: c === 0 || (c > 0) === (g > h) ? f : Math.sign(v) * h};
+ }
+ 
+ function char_new(code) {
+diff --git a/tests/run/float_text.bend b/tests/run/float_text.bend
+index 9e928845..3cdea3dd 100644
+--- a/tests/run/float_text.bend
++++ b/tests/run/float_text.bend
+@@ -1,5 +1,5 @@
+-# float text: F32.show is printf's %g (a JS emulation past exact
+-# ties), F32.read strtof's grammar behind a whole-string gate, so a
++# float text: F32.show is printf's %g (a JS emulation, exact ties
++# included), F32.read strtof's grammar behind a whole-string gate, so a
+ # spelling reads back to its value and a non-number answers None
+ import Base
+ 
+diff --git a/tests/run/float_text_lanes.bend b/tests/run/float_text_lanes.bend
+new file mode 100644
+index 00000000..5d6f7a4b
+--- /dev/null
++++ b/tests/run/float_text_lanes.bend
+@@ -0,0 +1,27 @@
++# F32.read and F32.show answer as the C lane does on JS: read rounds the
++# decimal once (JS once read 16777217.00000000001 as 16777216, the largest
++# decimal under the overflow threshold as inf (#1055) and the midpoint
++# 2^-150 as 0), takes ASCII space only (NBSP once read as 1), and show
++# rounds a decimal tie to even (23577.5625 once printed as 23577.563)
++import Base
++
++def bits(m: Maybe<&2, F32>) -> String:
++  match m:
++    case None{}:
++      "None"
++    case Some{v}:
++      U32.show(F32.bits(v))
++
++def main.out() -> String:
++  bits(F32.read("16777217.00000000001"))
++    ++ (" " ++ bits(F32.read("340282356779733661637539395458142568447")))
++    ++ (" " ++ bits(F32.read("-7.0064923216240854e-46")))
++    ++ (" " ++ bits(F32.read("\u{a0}1")))
++    ++ (" " ++ bits(F32.read(" \t\u{b}\u{c}\r\n1")))
++    ++ (" " ++ F32.show(23577.5625))
++    ++ (" " ++ F32.show(F32.neg(2983783.25)))
++
++def main() -> IO(Unit):
++  IO.print(main.out())
++
++#|1266679809 2139095039 2147483649 None 1065353216 23577.562 -2983783.2
