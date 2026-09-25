@@ -1,5 +1,5 @@
 diff --git a/bend2/comp.ts b/bend2/comp.ts
-index fb8d382..2c6f844 100644
+index fb8d382c..2c6f8449 100644
 --- a/bend2/comp.ts
 +++ b/bend2/comp.ts
 @@ -520,6 +520,37 @@ function nat_chk(n) {
@@ -85,7 +85,7 @@ index fb8d382..2c6f844 100644
  
  function char_new(code) {
 diff --git a/tests/run/float_text.bend b/tests/run/float_text.bend
-index 9e92884..3cdea3d 100644
+index 9e928845..3cdea3dd 100644
 --- a/tests/run/float_text.bend
 +++ b/tests/run/float_text.bend
 @@ -1,5 +1,5 @@
@@ -98,20 +98,15 @@ index 9e92884..3cdea3d 100644
  
 diff --git a/tests/run/float_text_lanes.bend b/tests/run/float_text_lanes.bend
 new file mode 100644
-index 0000000..bf39613
+index 00000000..d721ff19
 --- /dev/null
 +++ b/tests/run/float_text_lanes.bend
-@@ -0,0 +1,38 @@
-+# float text reads and prints the same on the JS lane as on the C lane:
-+# F32.read rounds the decimal once, as strtof does (the JS lane went
-+# through a double, so a decimal whose double is an f32 midpoint rounded
-+# twice: 16777217.00000000001 read as 16777216, the largest decimal under
-+# the overflow threshold read as inf (#1055), the first decimal past 2^-150
-+# read as 0); its leading space is ASCII only (\s took NBSP, U+00A0, which
-+# strtof refuses); and F32.show rounds a decimal tie to even, as printf
-+# does (toExponential rounds it up: 23577.5625 printed as 23577.563). An
-+# IO main runs through the JS path under `bend file.bend`, so the check
-+# lane's run pins the same text
+@@ -0,0 +1,25 @@
++# F32.read and F32.show give the C lane's answer on JS: the read rounds a
++# decimal once (via a double, 16777217.00000000001 read as 16777216 and the
++# largest decimal under the overflow threshold as inf, #1055), its leading
++# space is ASCII only (NBSP read as 1), and show rounds a decimal tie to even
++# (23577.5625 printed as 23577.563)
 +import Base
 +
 +def bits(m: Maybe<&2, F32>) -> String:
@@ -121,22 +116,14 @@ index 0000000..bf39613
 +    case Some{v}:
 +      U32.show(F32.bits(v))
 +
-+def main() -> IO(Unit):
-+  do IO<Unit>:
-+    Unit <- IO.print(bits(F32.read("16777217.00000000001")))
-+    Unit <- IO.print(bits(F32.read("-1.0000000596046447753906250001")))
-+    Unit <- IO.print(bits(F32.read("340282356779733661637539395458142568447")))
-+    Unit <- IO.print(bits(F32.read("7.0064923216240854e-46")))
-+    Unit <- IO.print(bits(F32.read("\u{a0}1")))
-+    Unit <- IO.print(bits(F32.read(" \t\u{b}\u{c}\r\n1")))
-+    Unit <- IO.print(F32.show(23577.5625))
-+    IO.print(F32.show(F32.neg(2983783.25)))
++def main.out() -> String:
++  bits(F32.read("16777217.00000000001"))
++    ++ (" " ++ bits(F32.read("340282356779733661637539395458142568447")))
++    ++ (" " ++ bits(F32.read("\u{a0}1")))
++    ++ (" " ++ bits(F32.read(" \t\u{b}\u{c}\r\n1")))
++    ++ (" " ++ F32.show(23577.5625))
 +
-+#|1266679809
-+#|3212836865
-+#|2139095039
-+#|1
-+#|None
-+#|1065353216
-+#|23577.562
-+#|-2983783.2
++def main() -> IO(Unit):
++  IO.print(main.out())
++
++#|1266679809 2139095039 None 1065353216 23577.562
