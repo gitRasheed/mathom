@@ -1,8 +1,8 @@
 diff --git a/bend2/comp.ts b/bend2/comp.ts
-index fb8d382c..2c6f8449 100644
+index fb8d382c..8c57e836 100644
 --- a/bend2/comp.ts
 +++ b/bend2/comp.ts
-@@ -520,6 +520,37 @@ function nat_chk(n) {
+@@ -520,6 +520,22 @@ function nat_chk(n) {
    return n;
  }
  
@@ -22,65 +22,67 @@ index fb8d382c..2c6f8449 100644
 +  return a > b ? 1 : a < b ? -1 : 0;
 +}
 +
-+// toExponential with a decimal tie rounded to even, as the C lane's printf
-+// rounds it (toExponential rounds a tie up).
-+function f32_exp(x, q) {
-+  const t = x.toExponential(q);
-+  const [man, ex] = t.split("e");
-+  const n = BigInt(man.replace(/[-.]/g, ""));
-+  const [m, p] = f64_exact(x);
-+  if ((n & 1n) === 0n || dec_cmp(2n * n - 1n, Number(ex) - q, m, p + 1) !== 0) {
-+    return t;
-+  }
-+  const d = String(n - 1n);
-+  return (man[0] === "-" ? "-" : "") + d[0] + (q > 0 ? "." + d.slice(1) : "")
-+    + "e" + ex;
-+}
-+
  function f32_show(x) {
    if (x !== x) {
      return "nan";
-@@ -530,7 +561,7 @@ function f32_show(x) {
+@@ -528,11 +544,26 @@ function f32_show(x) {
+     return x < 0 ? "-inf"
+       : x === 0 ? "-0" : "inf";
    }
-   let s = "x";
-   for (let p = 1; p <= 9 && Math.fround(Number(s)) !== x; p += 1) {
+-  let s = "x";
+-  for (let p = 1; p <= 9 && Math.fround(Number(s)) !== x; p += 1) {
 -    s = String(Number(x.toExponential(p - 1)));
-+    s = String(Number(f32_exp(x, p - 1)));
++  let q = -1;
++  let t = "x";
++  while (q < 8 && Math.fround(Number(t)) !== x) {
++    q += 1;
++    t = x.toExponential(q);
    }
-   return s;
- }
-@@ -543,10 +574,31 @@ function f32_from_bits(u) {
-   return new Float32Array(new Uint32Array([u]).buffer)[0];
+-  return s;
++  // toExponential rounds a decimal tie up, the C lane's printf to even: a
++  // tie at q digits is exact at q + 1, ending in 5, so an odd last digit
++  // steps down when the value is exactly half a unit below it
++  const [man, ex] = t.split("e");
++  if (/[13579]$/.test(man) && /5e/.test(x.toExponential(q + 1))
++    && Number(x.toExponential(q + 1)) === x) {
++    const n = BigInt(man.replace(/[-.]/g, ""));
++    const [m, p] = f64_exact(x);
++    if (dec_cmp(2n * n - 1n, Number(ex) - q, m, p + 1) === 0) {
++      const d = String(n - 1n);
++      t = man[0].replace(/[^-]/, "") + d[0] + (q > 0 ? "." + d.slice(1) : "") + "e" + ex;
++    }
++  }
++  return String(Number(t));
  }
  
-+// The decimal s, whose double is v, rounded once to f32 as strtof rounds it:
-+// fround(v) rounds twice, and misses when v is exactly an f32 midpoint (the
-+// overflow threshold 2^128 - 2^103 included, which fround takes to inf).
-+function f32_round(s, v) {
-+  const f = Math.fround(v);
-+  if (f === v || !Number.isFinite(v)) {
-+    return f;
-+  }
-+  const g = Math.min(Math.abs(f), 2 ** 128);
-+  const h = f32_from_bits(f32_bits(g) + (g < Math.abs(v) ? 1 : -1));
-+  if (Math.abs(v) !== (g + h) / 2) {
-+    return f;
-+  }
-+  const [, int, frac, exp] = /^[+-]?(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s.trim());
-+  const [m, p] = f64_exact(v);
-+  const c = dec_cmp(BigInt(int + frac), Number(exp ?? 0) - frac.length, m, p);
-+  return c === 0 || (c > 0) === (g > h) ? f : Math.sign(v) * h;
-+}
-+
+ function f32_bits(x) {
+@@ -544,9 +575,27 @@ function f32_from_bits(u) {
+ }
+ 
  function f32_read(s) {
 -  const re = /^\s*[+-]?((\d+\.?\d*|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
--  const v = Number(s.replace(/inf\w*/i, "Infinity"));
--  return re.test(s) ? {$: "Some", value: Math.fround(v)} : {$: "None"};
 +  const re = /^[ \t\n\v\f\r]*[+-]?((\d+\.?\d*|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
 +  if (!re.test(s)) {
 +    return {$: "None"};
 +  }
-+  return {$: "Some", value: f32_round(s, Number(s.replace(/inf\w*/i, "Infinity")))};
++  // Number then fround rounds twice, and misses when the double is exactly an
++  // f32 midpoint (the overflow threshold 2^128 - 2^103 included): the decimal
++  // then decides the side, compared with the midpoint exactly, as strtof does
+   const v = Number(s.replace(/inf\w*/i, "Infinity"));
+-  return re.test(s) ? {$: "Some", value: Math.fround(v)} : {$: "None"};
++  const f = Math.fround(v);
++  if (f === v || !Number.isFinite(v)) {
++    return {$: "Some", value: f};
++  }
++  const g = Math.min(Math.abs(f), 2 ** 128);
++  const h = f32_from_bits(f32_bits(g) + (g < Math.abs(v) ? 1 : -1));
++  if (Math.abs(v) !== (g + h) / 2) {
++    return {$: "Some", value: f};
++  }
++  const [, int, frac, exp] = /^[+-]?(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s.trim());
++  const [m, p] = f64_exact(v);
++  const c = dec_cmp(BigInt(int + frac), Number(exp ?? 0) - frac.length, m, p);
++  return {$: "Some", value: c === 0 || (c > 0) === (g > h) ? f : Math.sign(v) * h};
  }
  
  function char_new(code) {
