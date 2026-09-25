@@ -22,6 +22,6 @@ Test plan
 - [x] the other float tests still pass on all three
 - [x] `F32.show` matches C on all 74,525,948 f32 values that sit on a decimal tie, plus 2,088,960 random ones
 - [x] `F32.read` matches `strtof` on 246,287 edge-case strings, on bun and node
-- [x] 1M `F32.show` calls on bun: 2.56s on main, about 2.1s with this change; reads unchanged
+- [x] 1M `F32.show` calls on bun: 2.62s on main, 2.00s with this change; reads unchanged
 
 Closes #1055.

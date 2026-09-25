@@ -1,31 +1,26 @@
 diff --git a/bend2/comp.ts b/bend2/comp.ts
-index fb8d382c..8c57e836 100644
+index fb8d382c..6aee0aa4 100644
 --- a/bend2/comp.ts
 +++ b/bend2/comp.ts
-@@ -520,6 +520,22 @@ function nat_chk(n) {
+@@ -520,6 +520,17 @@ function nat_chk(n) {
    return n;
  }
  
-+// A finite double exactly, as [m, p] with |x| = m * 2^p.
-+function f64_exact(x) {
++// The sign of d * 10^k - |x| for a finite double x, exactly: |x| is m * 2^p
++function dec_cmp(d, k, x) {
 +  const b = new BigUint64Array(new Float64Array([Math.abs(x)]).buffer)[0];
 +  const e = Number(b >> 52n);
-+  return [e === 0 ? b : b & 0xfffffffffffffn | 1n << 52n, (e === 0 ? 1 : e) - 1075];
-+}
-+
-+// The sign of d * 10^k - m * 2^p, exactly.
-+function dec_cmp(d, k, m, p) {
-+  let a = k >= 0 ? d * 10n ** BigInt(k) : d;
-+  let b = k >= 0 ? m : m * 10n ** BigInt(-k);
-+  a = p >= 0 ? a : a << BigInt(-p);
-+  b = p >= 0 ? b << BigInt(p) : b;
-+  return a > b ? 1 : a < b ? -1 : 0;
++  const m = e === 0 ? b : b & 0xfffffffffffffn | 1n << 52n;
++  const p = (e === 0 ? 1 : e) - 1075;
++  const a = d * 10n ** BigInt(Math.max(k, 0)) << BigInt(Math.max(-p, 0));
++  const c = m * 10n ** BigInt(Math.max(-k, 0)) << BigInt(Math.max(p, 0));
++  return a > c ? 1 : a < c ? -1 : 0;
 +}
 +
  function f32_show(x) {
    if (x !== x) {
      return "nan";
-@@ -528,11 +544,26 @@ function f32_show(x) {
+@@ -528,11 +539,23 @@ function f32_show(x) {
      return x < 0 ? "-inf"
        : x === 0 ? "-0" : "inf";
    }
@@ -39,24 +34,21 @@ index fb8d382c..8c57e836 100644
 +    t = x.toExponential(q);
    }
 -  return s;
-+  // toExponential rounds a decimal tie up, the C lane's printf to even: a
-+  // tie at q digits is exact at q + 1, ending in 5, so an odd last digit
-+  // steps down when the value is exactly half a unit below it
++  // toExponential rounds a decimal tie up, the C lane's printf to even: an odd
++  // last digit steps down when the value is exactly half a unit below it
 +  const [man, ex] = t.split("e");
 +  if (/[13579]$/.test(man) && /5e/.test(x.toExponential(q + 1))
 +    && Number(x.toExponential(q + 1)) === x) {
 +    const n = BigInt(man.replace(/[-.]/g, ""));
-+    const [m, p] = f64_exact(x);
-+    if (dec_cmp(2n * n - 1n, Number(ex) - q, m, p + 1) === 0) {
-+      const d = String(n - 1n);
-+      t = man[0].replace(/[^-]/, "") + d[0] + (q > 0 ? "." + d.slice(1) : "") + "e" + ex;
++    if (dec_cmp(2n * n - 1n, Number(ex) - q, 2 * x) === 0) {
++      t = (x < 0 ? "-" : "") + (n - 1n) + "e" + (Number(ex) - q);
 +    }
 +  }
 +  return String(Number(t));
  }
  
  function f32_bits(x) {
-@@ -544,9 +575,27 @@ function f32_from_bits(u) {
+@@ -544,9 +567,25 @@ function f32_from_bits(u) {
  }
  
  function f32_read(s) {
@@ -65,9 +57,8 @@ index fb8d382c..8c57e836 100644
 +  if (!re.test(s)) {
 +    return {$: "None"};
 +  }
-+  // Number then fround rounds twice, and misses when the double is exactly an
-+  // f32 midpoint (the overflow threshold 2^128 - 2^103 included): the decimal
-+  // then decides the side, compared with the midpoint exactly, as strtof does
++  // fround after Number rounds twice: on an f32 midpoint (the overflow
++  // threshold 2^128 - 2^103 included) the decimal decides, as strtof does
    const v = Number(s.replace(/inf\w*/i, "Infinity"));
 -  return re.test(s) ? {$: "Some", value: Math.fround(v)} : {$: "None"};
 +  const f = Math.fround(v);
@@ -80,8 +71,7 @@ index fb8d382c..8c57e836 100644
 +    return {$: "Some", value: f};
 +  }
 +  const [, int, frac, exp] = /^[+-]?(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s.trim());
-+  const [m, p] = f64_exact(v);
-+  const c = dec_cmp(BigInt(int + frac), Number(exp ?? 0) - frac.length, m, p);
++  const c = dec_cmp(BigInt(int + frac), Number(exp ?? 0) - frac.length, v);
 +  return {$: "Some", value: c === 0 || (c > 0) === (g > h) ? f : Math.sign(v) * h};
  }
  
@@ -100,15 +90,15 @@ index 9e928845..3cdea3dd 100644
  
 diff --git a/tests/run/float_text_lanes.bend b/tests/run/float_text_lanes.bend
 new file mode 100644
-index 00000000..d721ff19
+index 00000000..5d6f7a4b
 --- /dev/null
 +++ b/tests/run/float_text_lanes.bend
-@@ -0,0 +1,25 @@
-+# F32.read and F32.show give the C lane's answer on JS: the read rounds a
-+# decimal once (via a double, 16777217.00000000001 read as 16777216 and the
-+# largest decimal under the overflow threshold as inf, #1055), its leading
-+# space is ASCII only (NBSP read as 1), and show rounds a decimal tie to even
-+# (23577.5625 printed as 23577.563)
+@@ -0,0 +1,27 @@
++# F32.read and F32.show answer as the C lane does on JS: read rounds the
++# decimal once (JS once read 16777217.00000000001 as 16777216, the largest
++# decimal under the overflow threshold as inf (#1055) and the midpoint
++# 2^-150 as 0), takes ASCII space only (NBSP once read as 1), and show
++# rounds a decimal tie to even (23577.5625 once printed as 23577.563)
 +import Base
 +
 +def bits(m: Maybe<&2, F32>) -> String:
@@ -121,11 +111,13 @@ index 00000000..d721ff19
 +def main.out() -> String:
 +  bits(F32.read("16777217.00000000001"))
 +    ++ (" " ++ bits(F32.read("340282356779733661637539395458142568447")))
++    ++ (" " ++ bits(F32.read("-7.0064923216240854e-46")))
 +    ++ (" " ++ bits(F32.read("\u{a0}1")))
 +    ++ (" " ++ bits(F32.read(" \t\u{b}\u{c}\r\n1")))
 +    ++ (" " ++ F32.show(23577.5625))
++    ++ (" " ++ F32.show(F32.neg(2983783.25)))
 +
 +def main() -> IO(Unit):
 +  IO.print(main.out())
 +
-+#|1266679809 2139095039 None 1065353216 23577.562
++#|1266679809 2139095039 2147483649 None 1065353216 23577.562 -2983783.2
