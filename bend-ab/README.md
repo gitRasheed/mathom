@@ -69,7 +69,8 @@ Building the oracle surfaced two behaviours in mathom itself:
 | `scripts/repros.sh` | runs every repro on every lane |
 | `scripts/run_suite.py` | runs Bend's own `tests/` locally the way `gates/test.ts` does |
 | `scripts/suite_report.py` | judges `run_suite.py` output with the gate's own exclusions |
-| `patches/` | 0001 fixes FINDINGS 2, 3, 4 (the JS `F32.read` and `F32.show`); 0002 fixes FINDINGS 8 (timer order, both loops) |
+| `patches/` | 0001 (superseded by `review/fix.patch`) and 0002 (timer order; upstream dropped the same change in #1052) |
+| `review/` | adversarial review of the F32 fix: `REVIEW.md`, the corrected `fix.patch` with its test, ready `issue.md` and `pr.md`, and the verification harness |
 
 ## Running
 

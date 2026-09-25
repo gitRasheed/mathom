@@ -1,0 +1,142 @@
+diff --git a/bend2/comp.ts b/bend2/comp.ts
+index fb8d382..2c6f844 100644
+--- a/bend2/comp.ts
++++ b/bend2/comp.ts
+@@ -520,6 +520,37 @@ function nat_chk(n) {
+   return n;
+ }
+ 
++// A finite double exactly, as [m, p] with |x| = m * 2^p.
++function f64_exact(x) {
++  const b = new BigUint64Array(new Float64Array([Math.abs(x)]).buffer)[0];
++  const e = Number(b >> 52n);
++  return [e === 0 ? b : b & 0xfffffffffffffn | 1n << 52n, (e === 0 ? 1 : e) - 1075];
++}
++
++// The sign of d * 10^k - m * 2^p, exactly.
++function dec_cmp(d, k, m, p) {
++  let a = k >= 0 ? d * 10n ** BigInt(k) : d;
++  let b = k >= 0 ? m : m * 10n ** BigInt(-k);
++  a = p >= 0 ? a : a << BigInt(-p);
++  b = p >= 0 ? b << BigInt(p) : b;
++  return a > b ? 1 : a < b ? -1 : 0;
++}
++
++// toExponential with a decimal tie rounded to even, as the C lane's printf
++// rounds it (toExponential rounds a tie up).
++function f32_exp(x, q) {
++  const t = x.toExponential(q);
++  const [man, ex] = t.split("e");
++  const n = BigInt(man.replace(/[-.]/g, ""));
++  const [m, p] = f64_exact(x);
++  if ((n & 1n) === 0n || dec_cmp(2n * n - 1n, Number(ex) - q, m, p + 1) !== 0) {
++    return t;
++  }
++  const d = String(n - 1n);
++  return (man[0] === "-" ? "-" : "") + d[0] + (q > 0 ? "." + d.slice(1) : "")
++    + "e" + ex;
++}
++
+ function f32_show(x) {
+   if (x !== x) {
+     return "nan";
+@@ -530,7 +561,7 @@ function f32_show(x) {
+   }
+   let s = "x";
+   for (let p = 1; p <= 9 && Math.fround(Number(s)) !== x; p += 1) {
+-    s = String(Number(x.toExponential(p - 1)));
++    s = String(Number(f32_exp(x, p - 1)));
+   }
+   return s;
+ }
+@@ -543,10 +574,31 @@ function f32_from_bits(u) {
+   return new Float32Array(new Uint32Array([u]).buffer)[0];
+ }
+ 
++// The decimal s, whose double is v, rounded once to f32 as strtof rounds it:
++// fround(v) rounds twice, and misses when v is exactly an f32 midpoint (the
++// overflow threshold 2^128 - 2^103 included, which fround takes to inf).
++function f32_round(s, v) {
++  const f = Math.fround(v);
++  if (f === v || !Number.isFinite(v)) {
++    return f;
++  }
++  const g = Math.min(Math.abs(f), 2 ** 128);
++  const h = f32_from_bits(f32_bits(g) + (g < Math.abs(v) ? 1 : -1));
++  if (Math.abs(v) !== (g + h) / 2) {
++    return f;
++  }
++  const [, int, frac, exp] = /^[+-]?(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s.trim());
++  const [m, p] = f64_exact(v);
++  const c = dec_cmp(BigInt(int + frac), Number(exp ?? 0) - frac.length, m, p);
++  return c === 0 || (c > 0) === (g > h) ? f : Math.sign(v) * h;
++}
++
+ function f32_read(s) {
+-  const re = /^\s*[+-]?((\d+\.?\d*|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
+-  const v = Number(s.replace(/inf\w*/i, "Infinity"));
+-  return re.test(s) ? {$: "Some", value: Math.fround(v)} : {$: "None"};
++  const re = /^[ \t\n\v\f\r]*[+-]?((\d+\.?\d*|\.\d+)(e[+-]?\d+)?|inf(inity)?|nan)$/i;
++  if (!re.test(s)) {
++    return {$: "None"};
++  }
++  return {$: "Some", value: f32_round(s, Number(s.replace(/inf\w*/i, "Infinity")))};
+ }
+ 
+ function char_new(code) {
+diff --git a/tests/run/float_text.bend b/tests/run/float_text.bend
+index 9e92884..3cdea3d 100644
+--- a/tests/run/float_text.bend
++++ b/tests/run/float_text.bend
+@@ -1,5 +1,5 @@
+-# float text: F32.show is printf's %g (a JS emulation past exact
+-# ties), F32.read strtof's grammar behind a whole-string gate, so a
++# float text: F32.show is printf's %g (a JS emulation, exact ties
++# included), F32.read strtof's grammar behind a whole-string gate, so a
+ # spelling reads back to its value and a non-number answers None
+ import Base
+ 
+diff --git a/tests/run/float_text_lanes.bend b/tests/run/float_text_lanes.bend
+new file mode 100644
+index 0000000..bf39613
+--- /dev/null
++++ b/tests/run/float_text_lanes.bend
+@@ -0,0 +1,38 @@
++# float text reads and prints the same on the JS lane as on the C lane:
++# F32.read rounds the decimal once, as strtof does (the JS lane went
++# through a double, so a decimal whose double is an f32 midpoint rounded
++# twice: 16777217.00000000001 read as 16777216, the largest decimal under
++# the overflow threshold read as inf (#1055), the first decimal past 2^-150
++# read as 0); its leading space is ASCII only (\s took NBSP, U+00A0, which
++# strtof refuses); and F32.show rounds a decimal tie to even, as printf
++# does (toExponential rounds it up: 23577.5625 printed as 23577.563). An
++# IO main runs through the JS path under `bend file.bend`, so the check
++# lane's run pins the same text
++import Base
++
++def bits(m: Maybe<&2, F32>) -> String:
++  match m:
++    case None{}:
++      "None"
++    case Some{v}:
++      U32.show(F32.bits(v))
++
++def main() -> IO(Unit):
++  do IO<Unit>:
++    Unit <- IO.print(bits(F32.read("16777217.00000000001")))
++    Unit <- IO.print(bits(F32.read("-1.0000000596046447753906250001")))
++    Unit <- IO.print(bits(F32.read("340282356779733661637539395458142568447")))
++    Unit <- IO.print(bits(F32.read("7.0064923216240854e-46")))
++    Unit <- IO.print(bits(F32.read("\u{a0}1")))
++    Unit <- IO.print(bits(F32.read(" \t\u{b}\u{c}\r\n1")))
++    Unit <- IO.print(F32.show(23577.5625))
++    IO.print(F32.show(F32.neg(2983783.25)))
++
++#|1266679809
++#|3212836865
++#|2139095039
++#|1
++#|None
++#|1065353216
++#|23577.562
++#|-2983783.2

@@ -29,13 +29,13 @@ observed limit is far below the documented one.
 | # | finding | lanes | patch |
 |---|---|---|---|
 | 1 | F32 literals are double-rounded: the literal denotes the wrong float | all | no (`bend.ts` is human-only) |
-| 2 | `F32.read` rounds twice on JS, once on C: different values | JS vs C | 0001 |
-| 3 | `F32.read` accepts Unicode whitespace on JS only | JS vs C | 0001 |
-| 4 | `F32.show` prints different digits on a decimal tie | JS vs C | 0001 |
+| 2 | `F32.read` rounds twice on JS, once on C: different values (upstream issue #1055 is the overflow-threshold case of this) | JS vs C | `review/fix.patch` |
+| 3 | `F32.read` accepts Unicode whitespace on JS only | JS vs C | `review/fix.patch` |
+| 4 | `F32.show` prints different digits on a decimal tie | JS vs C | `review/fix.patch` |
 | 5 | A non-scalar `Char` (lone surrogate, > U+10FFFF) kills the JS lane | JS vs C, checker | no |
 | 6 | A 2,000-element list literal overflows the JS stack | JS | no |
 | 7 | The checker cannot print a 10k-character String | checker | no |
-| 8 | Overdue sleepers resume in park order, not deadline order; Bend's own `io_spawn_sleep` fails on every Linux JS run | C and JS | 0002 |
+| 8 | Overdue sleepers resume in park order, not deadline order; Bend's own `io_spawn_sleep` fails on every JS run on this VM | C and JS | 0002, but see below: upstream dropped the same change (#1052) |
 
 ## Bend's own tests on Linux x86-64
 
@@ -57,6 +57,16 @@ ALSA builds. The 99 F32 tests pass on the unpatched checkout too.
 
 ## Patches
 
+**Patch 0001 is superseded by `review/fix.patch`.** An adversarial review
+(`review/REVIEW.md`) found that 0001 still reads the largest decimals below
+the f32 overflow threshold as infinity where C gives FLT_MAX (input
+`340282356779733661637539395458142568447`, the case of upstream issue #1055),
+plus three style and robustness defects. `review/fix.patch` is the same
+design with those fixed, a new test `tests/run/float_text_lanes.bend`, and
+a one-line correction to `tests/run/float_text.bend`'s header. The numbers
+below are for 0001 and are kept as the record; the review's own
+verification is in `review/REVIEW.md`.
+
 Both apply in order on 3360764 (`git apply`) and touch only
 `bend2/comp.ts`.
 
@@ -65,7 +75,7 @@ the JS runtime text only:
 
 | | before | after |
 |---|---|---|
-| `F32.read`: JS vs C `strtof`, 1,000,000 strings biased to f32 midpoints | 133,020 differ | 0 differ |
+| `F32.read`: JS vs C `strtof`, 1,000,000 strings biased to f32 midpoints | 133,020 differ | 0 differ (but this fuzz never reached the overflow threshold, where 0001 is still wrong) |
 | `F32.read`: NBSP, EM SPACE, BOM prefixes | JS accepts, C rejects | both reject |
 | `F32.show`: JS vs C, 200,000 fuzzed floats | 104 differ | 0 differ |
 
@@ -78,7 +88,10 @@ the front end.
 `patches/0002-io-resume-overdue-waits-in-deadline-order.patch` (entry 8)
 changes `io_wait` in both the C loop and the JS loop: the waits found due
 in one pass are resumed sorted by deadline (readiness-only waits first,
-ties in park order) instead of in park order.
+ties in park order) instead of in park order. Maintainer nicolas-abril
+opened the same change as PR #1052 and closed it himself ("it fixes the
+ordering, but it is not a performance improvement"), so report entry 8 as
+an issue and let them choose; do not send 0002 as a PR.
 
 | | before | after |
 |---|---|---|
@@ -140,7 +153,9 @@ Fix: anchor the JS regex on `[ \t\n\v\f\r]*` and reject before `Number()`.
 `repros/f32_show_ties.bend`
 
 When two shortest decimal strings both round-trip, the lanes pick
-differently. C's `printf("%.*e")` rounds the decimal tie to even; JS's
+differently. Exhaustively: of the 74,525,948 f32 values that sit on a
+decimal tie at 9 or fewer digits, exactly 8,388,608 (2^23) print
+differently, every one an 8-digit tie between 2^-12 and 4194303.25. C's `printf("%.*e")` rounds the decimal tie to even; JS's
 `toExponential` rounds it up. In 200,000 fuzzed floats, 104 printed
 differently (every other F32 op matched bit for bit, NaNs aside).
 
@@ -217,7 +232,7 @@ Two ways to wake late:
 
 | cause | lane | effect |
 |---|---|---|
-| the first `io_wait` calls `io_sys()`, which dlopens libc through `bun:ffi` (about 14 ms here), after the timeout was computed | JS, every run on Linux | `spawn_sleep` prints `main a b done` or `main done a b`, never `main b a done` (0 of 20 idle runs) |
+| the first `io_wait` wakes about 14 ms late (instrumented: a 1 ms `select` returned 14 ms later); the likely cause, not proven, is `io_sys()` loading libc through `bun:ffi` on first use, after the timeout was computed | JS, every run on this VM | `spawn_sleep` prints `main a b done` or `main done a b`, never `main b a done` (0 of 20 idle runs) |
 | another computation keeps the loop busy past both deadlines | C and JS | `late_wake_order` prints `a` before `b` every run |
 
 The late wake itself is ordinary (load, GC, a long pure step); the ordering
