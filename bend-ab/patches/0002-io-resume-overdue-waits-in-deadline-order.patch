@@ -1,0 +1,61 @@
+diff --git a/bend2/comp.ts b/bend2/comp.ts
+index 45cbfd9..aa47186 100644
+--- a/bend2/comp.ts
++++ b/bend2/comp.ts
+@@ -5840,17 +5840,29 @@ static void io_wait(Env e) {
+   }
+   u64   now  = io_tick();
+   IoQue todo = io_park;
++  IoQue due  = {0};
+   io_park = (IoQue){0};
+   while (todo.head != NULL) {
+-    IoAct* a   = io_pop(&todo);
+-    bool   due = (a->evts != 0
++    IoAct* a     = io_pop(&todo);
++    bool   ready = (a->evts != 0
+         && io_bit(set[a->evts == POLLOUT], (int)a->work.word, false))
+       || (a->time != 0 && a->time <= now);
+-    if (!due) {
++    if (!ready) {
+       io_push(&io_park, a);
+       continue;
+     }
+-    Term x = a->work.pack(e, &a->work);
++    // A late wake finds several deadlines past: resume them in deadline
++    // order (readiness alone first), not in the order they parked.
++    IoAct** at = &due.head;
++    while (*at != NULL && (*at)->time <= a->time) {
++      at = &(*at)->next;
++    }
++    a->next = *at;
++    *at     = a;
++  }
++  while (due.head != NULL) {
++    IoAct* a = io_pop(&due);
++    Term   x = a->work.pack(e, &a->work);
+     if (x != IO_PARK) {
+       a->item = x;
+       io_push(&io_runs, a);
+@@ -6401,14 +6413,21 @@ function io_wait(io) {
+     set.fill(0);
+   }
+   const now = performance.now();
++  const due = [];
+   io.waits = io.waits.filter((w) => {
+     const ready = w.at <= now || w.fd !== undefined
+       && set[at(w)] & 1 << (w.fd & 7);
+     if (ready) {
+-      io_push(io_wake, w, false);
++      due.push(w);
+     }
+     return !ready;
+   });
++  // A late wake finds several deadlines past: resume them in deadline
++  // order (readiness alone first), not in the order they parked.
++  due.sort((a, b) => (a.at ?? -Infinity) - (b.at ?? -Infinity) || 0);
++  for (const w of due) {
++    io_push(io_wake, w, false);
++  }
+ }
+ 
+ // Resume k with more's value; undefined means re-parked.

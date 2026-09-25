@@ -15,14 +15,75 @@ Environment for every entry:
 | clang | 18.1.3 |
 | bun / node | 1.3.11 / 22.22.2 |
 
-Bend's own gate runs its tests on Apple M4 minis only, so none of this
-platform was covered upstream. The entries below are not platform-specific
-unless stated.
+Bend's own gate runs its tests on Apple M4 minis only, so this platform
+was not covered upstream. The entries are not platform-specific unless
+stated.
 
 Before filing, each entry was checked against `WONTFIX.txt`. The NaN payload
 item (#797, #872), the JS deep-recursion item (#798, #802) and the Nat cap
 (#779) are already listed there and are not repeated here, except where the
 observed limit is far below the documented one.
+
+## Summary
+
+| # | finding | lanes | patch |
+|---|---|---|---|
+| 1 | F32 literals are double-rounded: the literal denotes the wrong float | all | no (`bend.ts` is human-only) |
+| 2 | `F32.read` rounds twice on JS, once on C: different values | JS vs C | 0001 |
+| 3 | `F32.read` accepts Unicode whitespace on JS only | JS vs C | 0001 |
+| 4 | `F32.show` prints different digits on a decimal tie | JS vs C | 0001 |
+| 5 | A non-scalar `Char` (lone surrogate, > U+10FFFF) kills the JS lane | JS vs C, checker | no |
+| 6 | A 2,000-element list literal overflows the JS stack | JS | no |
+| 7 | The checker cannot print a 10k-character String | checker | no |
+| 8 | Overdue sleepers resume in park order, not deadline order; Bend's own `io_spawn_sleep` fails on every Linux JS run | C and JS | 0002 |
+
+## Bend's own tests on Linux x86-64
+
+`scripts/run_suite.py` replays `gates/test.ts` locally (check lane via
+`--checkup`, then C and JS builds of every runnable test, output tidied and
+compared the same way). `scripts/suite_report.py` applies the gate's two
+exclusions (unprintable mains, the checkup process's own exit code).
+
+| | |
+|---|---|
+| tests | 1,464 (check lane 1,464, C 774, JS 793) |
+| failing | 5 |
+| `io_audio_only_{open,close,write}` [C] | this container lacks `libasound2-dev`, which the guide requires; environment, not Bend |
+| `io_spawn_sleep` [JS, check] | entry 8: fails 20/20 on an idle machine, C passes 20/20 |
+| `io_fork_join` [JS, check] | entry 8 under load: 3/10 fail while the machine is busy, 0/20 idle |
+
+With both patches applied, all 198 IO and F32 tests pass except the three
+ALSA builds. The 99 F32 tests pass on the unpatched checkout too.
+
+## Patches
+
+Both apply in order on 3360764 (`git apply`) and touch only
+`bend2/comp.ts`.
+
+`patches/0001-js-f32-read-show-match-c-lane.patch` (entries 2, 3, 4) changes
+the JS runtime text only:
+
+| | before | after |
+|---|---|---|
+| `F32.read`: JS vs C `strtof`, 1,000,000 strings biased to f32 midpoints | 133,020 differ | 0 differ |
+| `F32.read`: NBSP, EM SPACE, BOM prefixes | JS accepts, C rejects | both reject |
+| `F32.show`: JS vs C, 200,000 fuzzed floats | 104 differ | 0 differ |
+
+The read fix keeps `Number` then `Math.fround`, and only when the double
+lands exactly on an f32 midpoint does it compare the decimal to that
+midpoint exactly with BigInt. The show fix rounds a decimal tie to even
+the way `printf` does. The same exact-midpoint check would fix entry 1 in
+the front end.
+
+`patches/0002-io-resume-overdue-waits-in-deadline-order.patch` (entry 8)
+changes `io_wait` in both the C loop and the JS loop: the waits found due
+in one pass are resumed sorted by deadline (readiness-only waits first,
+ties in park order) instead of in park order.
+
+| | before | after |
+|---|---|---|
+| `tests/io/spawn_sleep.bend`, JS, 20 runs | 0 pass | 20 pass |
+| `repros/late_wake_order.bend`, C, 6 runs | 0 in deadline order | 6 in deadline order |
 
 ## 1. F32 literals are double-rounded (all lanes)
 
@@ -141,6 +202,29 @@ A pure main is normalized by the checker and printed. `String.repeat("a",
 10000n)` overflows the machine stack there (6,000 works). Clean error, low
 impact, same family as #798. It limits how much a test can compare on the
 checker lane.
+
+## 8. Overdue sleepers resume in park order, not deadline order
+
+`repros/late_wake_order.bend`, and Bend's own `tests/io/spawn_sleep.bend`
+
+`io_wait` (both loops in `bend2/comp.ts`) walks the parked computations in
+the order they parked and resumes every one whose deadline has passed. When
+the loop wakes late, several deadlines have passed at once, and they resume
+in park order. `tests/io/spawn_sleep.bend` states the intended rule ("two
+spawned pings wake in deadline order").
+
+Two ways to wake late:
+
+| cause | lane | effect |
+|---|---|---|
+| the first `io_wait` calls `io_sys()`, which dlopens libc through `bun:ffi` (about 14 ms here), after the timeout was computed | JS, every run on Linux | `spawn_sleep` prints `main a b done` or `main done a b`, never `main b a done` (0 of 20 idle runs) |
+| another computation keeps the loop busy past both deadlines | C and JS | `late_wake_order` prints `a` before `b` every run |
+
+The late wake itself is ordinary (load, GC, a long pure step); the ordering
+is the bug. On an M4 the FFI load is fast enough to hide it, which is why
+the gate passes. Fix (patch 0002): resume the due waits sorted by
+deadline. Moving the `io_sys()` call before the timeout computation would
+also stop the first wait from overshooting.
 
 ## Not bugs, but worth knowing
 

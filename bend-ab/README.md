@@ -23,14 +23,21 @@ The Bend lanes:
 | category | `core/src/category.rs` | 3,000 names: Unicode, NUL, emoji, 8 vs 9 UTF-8 byte extensions | 3,000/3,000 | 3,000/3,000 | 400/400 |
 | tree | `core/src/tree.rs`, `search.rs`, `stats.rs` | seeded trees of 648 to 67,373 nodes; aggregates, type breakdown, top 20, 17 queries x 2 hide modes, search and overlay | exact, 1 to 64 threads, 18 runs | exact to 14k nodes; stack overflow at 67k (WONTFIX #798) | n/a |
 | treemap | `core/src/treemap.rs` in F32 | 2,318 and 27,329 rects, bit-exact against an f32 mirror | exact at 1, 4, 16 threads | exact | n/a |
-| ops | U32/Nat primitives, `U32.read`, `Nat.read` | 400 edge pairs x 25 ops, 19 parse inputs | 419/419 vs JS | 419/419 vs C | see below |
+| ops | U32/Nat primitives, `U32.read`, `Nat.read` | 400 edge pairs x 25 ops, 19 parse inputs | 419/419 vs JS | 419/419 vs C | 400/400 on the 18 U32 ops (Nat ops are unary in the theory, too slow at these magnitudes) |
 
 Every mismatch seen against Rust during porting was a porting mistake (two
-fuel budgets set too low); none was Bend's. The Bend bugs are in
-`FINDINGS.md`: F32 literal and `F32.read` rounding, `F32.read` whitespace,
-`F32.show` tie digits, non-scalar `Char` on JS, and list-literal depth on
-JS. They were found by fuzzing the primitives mathom's logic depends on,
-around the port.
+fuel budgets set too low); none was Bend's. The Bend bugs, eight in all,
+are in `FINDINGS.md`. They were found by fuzzing the primitives mathom's
+logic depends on (F32 parsing and printing, `Char`, literals) and by running
+Bend's own 1,464 tests on this Linux x86-64 box, which Bend's Mac-only gate
+never covers. Two patches in `patches/` fix four of them, validated by
+fuzzing and by Bend's tests.
+
+| Bend's own suite here | |
+|---|---|
+| tests | 1,464 |
+| failing | 5: three need ALSA headers (environment), two are FINDINGS 8 (JS timer order) |
+| with `patches/` applied | the two timer tests pass; no regressions in the 198 IO and F32 tests |
 
 Performance on the 67k-node tree workload (generate, aggregate, 34
 searches and overlays, stats): Rust 0.30 s, Bend C 10.6 s at any thread
@@ -61,6 +68,8 @@ Building the oracle surfaced two behaviours in mathom itself:
 | `scripts/run.sh` | the driver |
 | `scripts/repros.sh` | runs every repro on every lane |
 | `scripts/run_suite.py` | runs Bend's own `tests/` locally the way `gates/test.ts` does |
+| `scripts/suite_report.py` | judges `run_suite.py` output with the gate's own exclusions |
+| `patches/` | 0001 fixes FINDINGS 2, 3, 4 (the JS `F32.read` and `F32.show`); 0002 fixes FINDINGS 8 (timer order, both loops) |
 
 ## Running
 
@@ -75,6 +84,8 @@ scripts/run.sh tree 3 14
 scripts/run.sh treemap 3 13
 scripts/run.sh ops
 scripts/repros.sh
+python3 scripts/run_suite.py "$BEND_ROOT" /tmp/bend-suite 3   # Bend's own tests, ~90 min on 4 cores
+python3 scripts/suite_report.py /tmp/bend-suite/results.jsonl
 ```
 
 Generated inputs land in `ports/*/gen*/` and builds in `ports/*/out/`,
