@@ -1,0 +1,10 @@
+[package]
+name = "oracle"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mathom-core = { path = "../../crates/core" }
+mathom-scanner-ntfs = { path = "../../crates/scanner-ntfs" }
+
+[workspace]
