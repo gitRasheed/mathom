@@ -128,6 +128,7 @@ interface TreeRowProps {
   hoveredId: number | null;
   onToggle: (id: number) => void;
   onSelect: (row: Row) => void;
+  onActivate: (row: Row) => void;
   onHoverRow: (id: number | null) => void;
   onContext: (id: number, x: number, y: number) => void;
 }
@@ -142,6 +143,7 @@ function TreeRow({
   hoveredId,
   onToggle,
   onSelect,
+  onActivate,
   onHoverRow,
   onContext,
 }: RowComponentProps<TreeRowProps>) {
@@ -162,6 +164,7 @@ function TreeRow({
       onClick={() => onSelect(row)}
       onDoubleClick={() => {
         if (row.isDir && row.hasChildren) onToggle(row.id);
+        onActivate(row);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -308,9 +311,10 @@ export interface TreeViewProps {
   revealId: number | null;
   onRevealed: () => void;
   onToggle: (id: number) => void;
+  /** Click and arrow keys: select only, the treemap stays where it is. */
   onSelect: (row: Row) => void;
-  /** Arrow-key selection: select only — Enter (onSelect) moves the view. */
-  onKeySelect: (row: Row) => void;
+  /** Enter and double-click: move the treemap to the row. */
+  onActivate: (row: Row) => void;
   onHoverRow: (id: number | null) => void;
   onContext: (id: number, x: number, y: number) => void;
   onSort: (key: SortKey) => void;
@@ -328,7 +332,7 @@ export function TreeView({
   onRevealed,
   onToggle,
   onSelect,
-  onKeySelect,
+  onActivate,
   onHoverRow,
   onContext,
   onSort,
@@ -359,7 +363,7 @@ export function TreeView({
     const action = navAction(e.key, flat, selectedIndex, expanded);
     if (!action) return;
     if (action.kind === "step") {
-      onKeySelect(flat[action.index].row);
+      onSelect(flat[action.index].row);
       listRef.current?.scrollToRow({
         index: action.index,
         align: "smart",
@@ -368,7 +372,7 @@ export function TreeView({
     } else if (action.kind === "toggle") {
       onToggle(action.id);
     } else {
-      onSelect(action.row);
+      onActivate(action.row);
     }
   };
 
@@ -393,6 +397,7 @@ export function TreeView({
             hoveredId,
             onToggle,
             onSelect,
+            onActivate,
             onHoverRow,
             onContext,
           }}

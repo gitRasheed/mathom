@@ -103,7 +103,7 @@ export default function App() {
     [pathOf],
   );
 
-  const handleTreeSelect = useCallback(
+  const handleTreeActivate = useCallback(
     (row: Row) => {
       select(row.id);
       if (row.isDir) {
@@ -193,10 +193,7 @@ export default function App() {
     [generation, select],
   );
 
-  const handleTreeKeySelect = useCallback(
-    (row: Row) => select(row.id),
-    [select],
-  );
+  const handleTreeSelect = useCallback((row: Row) => select(row.id), [select]);
 
   // Only a pure `ext:` filter is treated as the active type list; other queries start fresh.
   const { filter } = scan;
@@ -410,7 +407,7 @@ export default function App() {
               onRevealed={handleRevealed}
               onToggle={scan.toggleExpand}
               onSelect={handleTreeSelect}
-              onKeySelect={handleTreeKeySelect}
+              onActivate={handleTreeActivate}
               onHoverRow={setHoveredId}
               onContext={handleContextMenu}
               onSort={scan.changeSort}
