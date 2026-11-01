@@ -11,6 +11,7 @@
   --color-edge-strong: #3f3f46;
   --color-plate: #30323a; /* treemap directory plate */
   --color-plate-grain: #454a57; /* dots on bare plate: culled-content texture */
+  --color-folder: #6b6146; /* treemap folder closed by the depth limit */
 
   --color-ink: #f4f4f5;
   --color-ink-2: #d4d4d8;
@@ -46,6 +47,7 @@
   --color-edge-strong: #d4d4d8;
   --color-plate: #dcdce0;
   --color-plate-grain: #bfc0c8;
+  --color-folder: #d9cda3;
 
   --color-ink: #18181b;
   --color-ink-2: #3f3f46;

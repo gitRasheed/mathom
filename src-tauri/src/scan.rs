@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use mathom_core::export::ExportOptions;
 use mathom_core::search::{FilterOverlay, SearchQuery};
 use mathom_core::tree::{NodeId, Tree};
-use mathom_core::{EntryFlags, TreeBuilder, TreemapOptions, Viewport, treemap};
+use mathom_core::{EntryFlags, MAX_LAYOUT_DEPTH, TreeBuilder, TreemapOptions, Viewport, treemap};
 use mathom_scanner::{GenericScanner, ScanEvent, ScanHandle, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -168,6 +168,22 @@ pub struct TreemapRectDto {
     depth: u8,
     is_dir: bool,
     category: u8,
+    expanded: bool,
+    /// Only on folded directories under a depth cap, the ones the UI labels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreemapArgs {
+    width: f32,
+    height: f32,
+    hide_system: bool,
+    filter: Option<String>,
+    /// `None` draws every level.
+    max_depth: Option<u8>,
+    reveal: Option<NodeId>,
 }
 
 #[derive(Clone, Serialize)]
@@ -343,10 +359,7 @@ pub fn get_treemap(
     state: State<'_, AppState>,
     generation: u64,
     root_id: NodeId,
-    width: f32,
-    height: f32,
-    hide_system: bool,
-    filter: Option<String>,
+    args: TreemapArgs,
 ) -> Result<Vec<TreemapRectDto>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -360,14 +373,16 @@ pub fn get_treemap(
     let opts = TreemapOptions {
         min_area_px: 3.0,
         padding_px: 1.0,
-        max_depth: 24,
-        hide_system,
+        max_depth: args.max_depth.map_or(MAX_LAYOUT_DEPTH, |d| d.max(1)),
+        hide_system: args.hide_system,
+        reveal: args.reveal,
     };
+    let capped = args.max_depth.is_some();
     let viewport = Viewport {
-        w: width,
-        h: height,
+        w: args.width,
+        h: args.height,
     };
-    let rects = match overlay_for(&session, tree, filter.as_deref(), hide_system) {
+    let rects = match overlay_for(&session, tree, args.filter.as_deref(), args.hide_system) {
         Some(o) => treemap::layout_with_filter(tree, root_id, viewport, &opts, &o.bytes),
         None => treemap::layout(tree, root_id, viewport, &opts),
     };
@@ -382,6 +397,8 @@ pub fn get_treemap(
             depth: r.depth,
             is_dir: r.is_dir,
             category: r.category,
+            expanded: r.expanded,
+            name: (capped && r.is_dir && !r.expanded).then(|| tree.name(r.id).to_owned()),
         })
         .collect())
 }
@@ -399,8 +416,6 @@ pub struct TypeStatDto {
 #[serde(rename_all = "camelCase")]
 pub struct TypePanelData {
     types: Vec<TypeStatDto>,
-    total_bytes: u64,
-    total_files: u64,
     top_files: Vec<Row>,
 }
 
@@ -424,7 +439,7 @@ pub fn get_type_stats(
     let overlay = overlay_for(&session, tree, filter.as_deref(), hide_system);
     let visible = overlay.as_deref().map(|o| o.visible.as_slice());
     let filtered = mathom_core::stats::type_breakdown(tree, root_id, hide_system, visible);
-    let (total_bytes, total_files) = (filtered.total_bytes, filtered.total_files);
+    let total_bytes = filtered.total_bytes;
     let top_files =
         mathom_core::stats::largest_files(tree, root_id, TOP_FILES, hide_system, visible)
             .into_iter()
@@ -445,8 +460,6 @@ pub fn get_type_stats(
                 files: t.files,
             })
             .collect(),
-        total_bytes,
-        total_files,
         top_files,
     })
 }

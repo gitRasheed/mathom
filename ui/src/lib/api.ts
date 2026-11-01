@@ -46,6 +46,21 @@ export interface TreemapRect {
   depth: number;
   isDir: boolean;
   category: number;
+  /** A directory whose children were laid out. */
+  expanded: boolean;
+  /** Only on folded directories under a depth cap. */
+  name?: string;
+}
+
+export interface TreemapArgs {
+  width: number;
+  height: number;
+  hideSystem: boolean;
+  filter: string | null;
+  /** null draws every level. */
+  maxDepth: number | null;
+  /** Kept visible past maxDepth. */
+  reveal: number | null;
 }
 
 export interface Crumb {
@@ -81,8 +96,6 @@ export interface TypeStat {
 export interface TypePanelData {
   /** Every extension in the subtree, largest first. */
   types: TypeStat[];
-  totalBytes: number;
-  totalFiles: number;
   topFiles: Row[];
 }
 
@@ -152,22 +165,8 @@ export const api = {
     invoke<Row | null>("get_node", { generation, id }),
   getPath: (generation: number, id: number) =>
     invoke<string>("get_path", { generation, id }),
-  getTreemap: (
-    generation: number,
-    rootId: number,
-    width: number,
-    height: number,
-    hideSystem: boolean,
-    filter: string | null,
-  ) =>
-    invoke<TreemapRect[]>("get_treemap", {
-      generation,
-      rootId,
-      width,
-      height,
-      hideSystem,
-      filter,
-    }),
+  getTreemap: (generation: number, rootId: number, args: TreemapArgs) =>
+    invoke<TreemapRect[]>("get_treemap", { generation, rootId, args }),
   getTypeStats: (
     generation: number,
     rootId: number,
