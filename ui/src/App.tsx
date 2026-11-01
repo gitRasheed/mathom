@@ -14,9 +14,14 @@ import {
   type Row,
   type SearchHit,
   type Snapshot,
-  type TreemapRect,
 } from "./lib/api";
 import { copyText } from "./lib/clipboard";
+import {
+  loadTreemapPrefs,
+  saveTreemapPrefs,
+  treemapDepth,
+  type TreemapPrefs,
+} from "./lib/prefs";
 import { onUiError, reportUiError, reportUnlessStale } from "./lib/errors";
 
 const TREE_PANE_MIN = 320;
@@ -52,6 +57,7 @@ export default function App() {
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewRootId, setViewRootId] = useState(0);
+  const [treemapPrefs, setTreemapPrefs] = useState(loadTreemapPrefs);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [revealId, setRevealId] = useState<number | null>(null);
   const [treeWidth, setTreeWidth] = useState(560);
@@ -122,15 +128,14 @@ export default function App() {
   );
 
   const handleTreemapSelect = useCallback(
-    (rect: TreemapRect) => {
-      select(rect.id);
-      if (rect.isDir) setViewRootId(rect.id);
+    (id: number) => {
+      select(id);
       if (generation === 0) return;
       api
-        .getAncestors(generation, rect.id)
+        .getAncestors(generation, id)
         .then((chain) => {
           expandMany(chain.slice(0, -1).map((c) => c.id));
-          setRevealId(rect.id);
+          setRevealId(id);
         })
         .catch((e) => reportUnlessStale("revealing selection", e));
     },
@@ -175,6 +180,11 @@ export default function App() {
 
   const handleNavigate = useCallback((id: number) => {
     setViewRootId(id);
+  }, []);
+
+  const handleTreemapPrefs = useCallback((prefs: TreemapPrefs) => {
+    setTreemapPrefs(prefs);
+    saveTreemapPrefs(prefs);
   }, []);
 
   const handleRevealed = useCallback(() => setRevealId(null), []);
@@ -360,6 +370,7 @@ export default function App() {
         viewRootId={viewRootId}
         startError={scan.startError}
         hideSystem={scan.hideSystem}
+        treemapPrefs={treemapPrefs}
         filter={scan.filter}
         typePanelOpen={typePanelOpen}
         themePref={theme.pref}
@@ -367,6 +378,7 @@ export default function App() {
         onScan={handleScan}
         onCancel={scan.cancel}
         onToggleHideSystem={scan.toggleHideSystem}
+        onTreemapPrefs={handleTreemapPrefs}
         onToggleTypePanel={() => setTypePanelOpen((v) => !v)}
         onSearchSelect={handleSearchSelect}
         onApplyFilter={scan.setFilter}
@@ -425,6 +437,8 @@ export default function App() {
             themeRev={theme.themeRev}
             hideSystem={scan.hideSystem}
             filter={scan.filter}
+            maxDepth={treemapDepth(treemapPrefs)}
+            openInPlace={treemapPrefs.style === "spacesniffer"}
             selected={selected}
             hoveredId={hoveredId}
             onSelect={handleTreemapSelect}

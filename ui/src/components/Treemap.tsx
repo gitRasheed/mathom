@@ -30,6 +30,7 @@ import { PALETTE, canvasColors } from "../lib/palette";
 const SCAN_REFRESH_MS = 400;
 const ZOOM_MS = 220;
 const TOOLTIP_DELAY_MS = 120;
+const LABEL_FONT = 'ui-sans-serif, system-ui, "Segoe UI", sans-serif';
 
 // Grain tile for directory plates. By the layout's contract, culled children
 // still consume their share of space, so every bare plate pixel is real bytes
@@ -88,6 +89,22 @@ function snap(r: TreemapRect, dpr: number, gap: number): Snapped {
   return { x: x0, y: y0, w: x1 - x0 - gap, h: y1 - y0 - gap };
 }
 
+// Pre-order: the nearest shallower rect before a child is its parent.
+function parentOf(
+  rects: TreemapRect[],
+  child: TreemapRect,
+): TreemapRect | undefined {
+  for (let i = rects.indexOf(child) - 1; i >= 0; i--) {
+    if (rects[i].depth < child.depth) return rects[i];
+  }
+  return undefined;
+}
+
+const isFolded = (r: TreemapRect) => r.isDir && !r.expanded;
+
+const folderOf = (rects: TreemapRect[], r: TreemapRect) =>
+  r.isDir ? r : parentOf(rects, r);
+
 interface TooltipData {
   name: string;
   size: string;
@@ -106,9 +123,13 @@ export interface TreemapProps {
   hideSystem: boolean;
   /** Active view filter (search grammar) or null. */
   filter: string | null;
+  /** Levels drawn below the view root; null draws them all. */
+  maxDepth: number | null;
+  /** Clicking a folder opens it in place instead of zooming into it. */
+  openInPlace: boolean;
   selected: number | null;
   hoveredId: number | null;
-  onSelect: (rect: TreemapRect) => void;
+  onSelect: (id: number) => void;
   onHover: (id: number | null) => void;
   onNavigate: (id: number) => void;
   onContext: (id: number, x: number, y: number, zoom: ZoomTargets) => void;
@@ -128,6 +149,8 @@ export function Treemap({
   themeRev,
   hideSystem,
   filter,
+  maxDepth,
+  openInPlace,
   selected,
   hoveredId,
   onSelect,
@@ -155,6 +178,11 @@ export function Treemap({
   const tooltipSeqRef = useRef(0);
   const tooltipTimerRef = useRef(0);
   const lastMouseRef = useRef({ x: 0, y: 0 });
+  // The clicked node the layout keeps open past the depth cap, until the view moves.
+  const openRef = useRef<number | null>(null);
+  // Just clicked open; zoom instead if nothing inside is big enough to draw.
+  const pendingOpenRef = useRef<number | null>(null);
+  const layoutCappedRef = useRef(false);
 
   const generationRef = useRef(generation);
   generationRef.current = generation;
@@ -166,6 +194,12 @@ export function Treemap({
   hideSystemRef.current = hideSystem;
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const maxDepthRef = useRef(maxDepth);
+  maxDepthRef.current = maxDepth;
+  const openInPlaceRef = useRef(openInPlace);
+  openInPlaceRef.current = openInPlace;
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
 
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -195,15 +229,17 @@ export function Treemap({
     };
     outline(selectedRef.current, theme.selection, 2);
     const hovered = hoveredIdRef.current;
-    if (hovered !== null && hovered !== selectedRef.current) {
-      if (hovered === rootIdRef.current || crumbIdsRef.current.has(hovered)) {
-        ctx.strokeStyle = theme.hoverRing;
-        ctx.lineWidth = 3;
-        ctx.strokeRect(1.5, 1.5, overlay.width - 3, overlay.height - 3);
-      } else {
-        outline(hovered, theme.hoverRing, 2);
-      }
+    if (hovered === null) return;
+    if (hovered === rootIdRef.current || crumbIdsRef.current.has(hovered)) {
+      ctx.strokeStyle = theme.hoverRing;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1.5, 1.5, overlay.width - 3, overlay.height - 3);
+      return;
     }
+    const r = byIdRef.current.get(hovered);
+    const folder = r && parentOf(rectsRef.current, r);
+    if (folder) outline(folder.id, theme.hoverRing, 1);
+    if (hovered !== selectedRef.current) outline(hovered, theme.hoverRing, 2);
   }, []);
 
   const blit = useCallback(() => {
@@ -248,9 +284,11 @@ export function Treemap({
       getGrainTile(theme.plate, theme.plateGrain),
       "repeat",
     )!;
+    const capped = layoutCappedRef.current;
+    const closed = (r: TreemapRect) => capped && isFolded(r);
     ctx.beginPath();
     for (const r of rects) {
-      if (!r.isDir) continue;
+      if (!r.isDir || closed(r)) continue;
       const s = snap(r, dpr, 0);
       if (s.w > 0 && s.h > 0) ctx.rect(s.x, s.y, s.w, s.h);
     }
@@ -272,11 +310,35 @@ export function Treemap({
       ctx.fill();
     }
 
+    ctx.fillStyle = theme.folder;
+    ctx.beginPath();
+    for (const r of rects) {
+      if (!closed(r)) continue;
+      const s = snap(r, dpr, 1);
+      if (s.w > 0 && s.h > 0) ctx.rect(s.x, s.y, s.w, s.h);
+    }
+    ctx.fill();
+
     const sprite = getHighlightSprite();
     for (const r of rects) {
       if (r.isDir) continue;
       const s = snap(r, dpr, 1);
       if (s.w > 3 && s.h > 3) ctx.drawImage(sprite, s.x, s.y, s.w, s.h);
+    }
+
+    ctx.font = `${12 * dpr}px ${LABEL_FONT}`;
+    ctx.textBaseline = "top";
+    for (const r of rects) {
+      if (!closed(r) || !r.name) continue;
+      const s = snap(r, dpr, 1);
+      if (s.w < 48 * dpr || s.h < 24 * dpr) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(s.x + 6 * dpr, s.y, s.w - 12 * dpr, s.h);
+      ctx.clip();
+      ctx.fillStyle = theme.selection;
+      ctx.fillText(r.name, s.x + 6 * dpr, s.y + 6 * dpr);
+      ctx.restore();
     }
 
     if (zoomRafRef.current === 0) blit();
@@ -320,21 +382,29 @@ export function Treemap({
     const forRoot = rootIdRef.current;
     lastFetchRef.current = performance.now();
     try {
-      const rects = await api.getTreemap(
-        generation,
-        forRoot,
-        w,
-        h,
-        hideSystemRef.current,
-        filterRef.current,
-      );
+      const maxDepth = maxDepthRef.current;
+      const reveal = maxDepth === null ? null : openRef.current;
+      const rects = await api.getTreemap(generation, forRoot, {
+        width: w,
+        height: h,
+        hideSystem: hideSystemRef.current,
+        filter: filterRef.current,
+        maxDepth,
+        reveal,
+      });
       if (seq !== fetchSeqRef.current || forRoot !== rootIdRef.current) return;
       rectsRef.current = rects;
+      layoutCappedRef.current = maxDepth !== null;
       byIdRef.current = new Map(rects.map((r) => [r.id, r]));
       hitFrozenRef.current = false;
       setHasRects(rects.length > 0);
       bake();
       if (crumbsRootRef.current !== forRoot) refreshCrumbs();
+      const pending = pendingOpenRef.current;
+      if (pending === null || pending !== reveal) return;
+      pendingOpenRef.current = null;
+      const opened = byIdRef.current.get(pending);
+      if (opened && isFolded(opened)) onNavigateRef.current(opened.id);
     } catch (e) {
       reportUnlessStale("loading treemap", e);
       if (seq === fetchSeqRef.current) hitFrozenRef.current = false;
@@ -345,6 +415,8 @@ export function Treemap({
     (id: number) => {
       if (id === rootIdRef.current) return;
       const zoomFrom = byIdRef.current.get(id);
+      openRef.current = null;
+      pendingOpenRef.current = null;
       rootIdRef.current = id;
       hitFrozenRef.current = true;
       setTooltip(null);
@@ -402,6 +474,8 @@ export function Treemap({
     hitFrozenRef.current = false;
     crumbsRootRef.current = null;
     crumbIdsRef.current = new Set();
+    openRef.current = null;
+    pendingOpenRef.current = null;
     offscreenRef.current = null;
     const base = baseRef.current;
     if (base) base.getContext("2d")!.clearRect(0, 0, base.width, base.height);
@@ -422,8 +496,11 @@ export function Treemap({
   }, [themeRev, bake]);
 
   useEffect(() => {
+    // An open folder belongs to the layout it was clicked in.
+    openRef.current = null;
+    pendingOpenRef.current = null;
     void fetchLayout();
-  }, [hideSystem, filter, fetchLayout]);
+  }, [hideSystem, filter, maxDepth, fetchLayout]);
 
   const prevStateRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -578,11 +655,22 @@ export function Treemap({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      // The second click of a double-click would land on what the first revealed.
+      if (e.detail > 1) return;
       const bounds = containerRef.current!.getBoundingClientRect();
       const hit = hitTest(e.clientX - bounds.left, e.clientY - bounds.top);
-      if (hit) onSelect(hit);
+      if (!hit) return;
+      onSelect(hit.id);
+      if (!openInPlaceRef.current && hit.isDir) {
+        onNavigate(hit.id);
+        return;
+      }
+      if (maxDepthRef.current === null || openRef.current === hit.id) return;
+      openRef.current = hit.id;
+      pendingOpenRef.current = hit.id;
+      void fetchLayout();
     },
-    [hitTest, onSelect],
+    [hitTest, onSelect, onNavigate, fetchLayout],
   );
 
   const handleContextMenu = useCallback(
@@ -601,15 +689,17 @@ export function Treemap({
     [hitTest, regionAt, crumbs, onContext],
   );
 
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (zoomRafRef.current !== 0) return;
-      const bounds = containerRef.current!.getBoundingClientRect();
-      const region = regionAt(e.clientX - bounds.left, e.clientY - bounds.top);
-      if (region) onNavigate(region.id);
-    },
-    [regionAt, onNavigate],
-  );
+  const selectedFolder = useCallback(() => {
+    const id = selectedRef.current;
+    const r = id === null ? undefined : byIdRef.current.get(id);
+    return r && folderOf(rectsRef.current, r);
+  }, []);
+
+  const handleDoubleClick = useCallback(() => {
+    if (zoomRafRef.current !== 0) return;
+    const target = selectedFolder();
+    if (target) onNavigate(target.id);
+  }, [selectedFolder, onNavigate]);
 
   const zoomOut = useCallback(() => {
     if (crumbs.length < 2 || hitFrozenRef.current) return;

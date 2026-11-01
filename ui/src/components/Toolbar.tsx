@@ -1,4 +1,5 @@
 import type { SearchHit } from "../lib/api";
+import type { TreemapPrefs } from "../lib/prefs";
 import type { AccentName, ThemePref } from "../lib/theme";
 import { ExportMenu } from "./ExportMenu";
 import { ScanMenu } from "./ScanMenu";
@@ -13,6 +14,7 @@ interface ToolbarProps {
   viewRootId: number;
   startError: string | null;
   hideSystem: boolean;
+  treemapPrefs: TreemapPrefs;
   filter: string | null;
   typePanelOpen: boolean;
   themePref: ThemePref;
@@ -20,6 +22,7 @@ interface ToolbarProps {
   onScan: (path: string) => void;
   onCancel: () => void;
   onToggleHideSystem: () => void;
+  onTreemapPrefs: (prefs: TreemapPrefs) => void;
   onToggleTypePanel: () => void;
   onSearchSelect: (hit: SearchHit) => void;
   onApplyFilter: (query: string | null) => void;
@@ -33,6 +36,7 @@ export function Toolbar({
   viewRootId,
   startError,
   hideSystem,
+  treemapPrefs,
   filter,
   typePanelOpen,
   themePref,
@@ -40,6 +44,7 @@ export function Toolbar({
   onScan,
   onCancel,
   onToggleHideSystem,
+  onTreemapPrefs,
   onToggleTypePanel,
   onSearchSelect,
   onApplyFilter,
@@ -100,6 +105,8 @@ export function Toolbar({
         themePref={themePref}
         accent={accent}
         onToggleHideSystem={onToggleHideSystem}
+        treemapPrefs={treemapPrefs}
+        onTreemapPrefs={onTreemapPrefs}
         onThemePref={onThemePref}
         onAccent={onAccent}
       />

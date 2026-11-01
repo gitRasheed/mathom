@@ -5,7 +5,28 @@ import {
   type ThemePref,
   accentSwatch,
 } from "../lib/theme";
+import {
+  MAX_TREEMAP_DEPTH,
+  type TreemapPrefs,
+  type TreemapStyle,
+  treemapDepth,
+} from "../lib/prefs";
+import { DepthPicker } from "./DepthPicker";
 import { PaletteIcon } from "./icons";
+
+const DEPTH_PRESETS = {
+  default: [null, 1, 2],
+  spacesniffer: [1, 2],
+} as const;
+
+const STYLE_OPTIONS: { value: TreemapStyle; label: string; title: string }[] = [
+  { value: "default", label: "Default", title: "Click zooms into a folder" },
+  {
+    value: "spacesniffer",
+    label: "SpaceSniffer",
+    title: "Click opens a folder in place",
+  },
+];
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "system", label: "System" },
@@ -15,22 +36,30 @@ const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
 
 interface SettingsMenuProps {
   hideSystem: boolean;
+  treemapPrefs: TreemapPrefs;
   themePref: ThemePref;
   accent: AccentName;
   onToggleHideSystem: () => void;
+  onTreemapPrefs: (prefs: TreemapPrefs) => void;
   onThemePref: (pref: ThemePref) => void;
   onAccent: (accent: AccentName) => void;
 }
 
 export function SettingsMenu({
   hideSystem,
+  treemapPrefs,
   themePref,
   accent,
   onToggleHideSystem,
+  onTreemapPrefs,
   onThemePref,
   onAccent,
 }: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
+  const depth = treemapDepth(treemapPrefs);
+  const [customDepth, setCustomDepth] = useState(
+    depth !== null && depth > 2 ? depth : 3,
+  );
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -80,6 +109,34 @@ export function SettingsMenu({
             />
             Hide system files
           </label>
+          <div className="mt-2.5 text-[12px] text-ink-2">Treemap style</div>
+          <div className="mt-1.5 flex rounded-md border border-edge p-0.5">
+            {STYLE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                title={opt.title}
+                onClick={() =>
+                  onTreemapPrefs({ ...treemapPrefs, style: opt.value })
+                }
+                className={`h-6 flex-1 rounded text-[12px] ${
+                  treemapPrefs.style === opt.value
+                    ? "bg-raised text-ink"
+                    : "text-ink-4 hover:text-ink-2"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2.5 text-[12px] text-ink-2">Treemap depth</div>
+          <DepthPicker
+            value={depth}
+            presets={DEPTH_PRESETS[treemapPrefs.style]}
+            custom={customDepth}
+            max={MAX_TREEMAP_DEPTH}
+            onChange={(d) => onTreemapPrefs({ ...treemapPrefs, depth: d })}
+            onCustom={setCustomDepth}
+          />
           <div className="mt-3 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
             Theme
           </div>
