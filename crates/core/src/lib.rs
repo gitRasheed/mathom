@@ -13,4 +13,4 @@ pub mod treemap;
 pub use category::{CATEGORY_COUNT, Category, categorize};
 pub use entry::{EntryBatch, EntryFlags, FileEntry};
 pub use tree::{Node, NodeId, Removed, Tree, TreeBuilder};
-pub use treemap::{TreemapOptions, TreemapRect, Viewport};
+pub use treemap::{MAX_LAYOUT_DEPTH, TreemapOptions, TreemapRect, Viewport};

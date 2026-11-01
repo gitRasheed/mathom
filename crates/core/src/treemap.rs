@@ -2,8 +2,7 @@
 //!
 //! Rects are emitted parents-before-children: forward iteration is painter's
 //! order for drawing, reverse is deepest-first for hit-testing. Children
-//! below `min_side_px` are culled but still consume their share of space, and
-//! a directory only subdivides while its own interior can hold a legible one.
+//! below `min_area_px` are culled but still consume their share of space.
 
 use crate::category::categorize;
 use crate::entry::EntryFlags;
@@ -15,31 +14,28 @@ pub struct Viewport {
     pub h: f32,
 }
 
+/// The deepest level any layout draws: tree depth is unbounded and `emit` recurses.
+pub const MAX_LAYOUT_DEPTH: u8 = 24;
+
 #[derive(Clone, Copy, Debug)]
 pub struct TreemapOptions {
-    /// Legibility floor: a child is drawn only if it is at least this wide
-    /// *and* this tall. An area test alone lets a 40×0.1 sliver through, which
-    /// is how the map ends up as a mosaic of specks nothing can be read from.
-    /// Culled children still consume their share of the parent.
-    pub min_side_px: f32,
+    pub min_area_px: f32,
     pub padding_px: f32,
-    /// Vertical strip a directory reserves at the top of its interior for its
-    /// label; zero reserves nothing. Only the *children's* frame shrinks —
-    /// see `emit` for why a directory's own rect must not depend on this.
-    pub label_px: f32,
     pub max_depth: u8,
     /// Omit SYSTEM entries and proportion tiles by visible bytes.
     pub hide_system: bool,
+    /// Kept visible past `max_depth`: its ancestors draw open, and so does it if a directory.
+    pub reveal: Option<NodeId>,
 }
 
 impl Default for TreemapOptions {
     fn default() -> Self {
         TreemapOptions {
-            min_side_px: 1.0,
+            min_area_px: 1.0,
             padding_px: 1.0,
-            label_px: 0.0,
-            max_depth: 32,
+            max_depth: MAX_LAYOUT_DEPTH,
             hide_system: false,
+            reveal: None,
         }
     }
 }
@@ -54,6 +50,8 @@ pub struct TreemapRect {
     pub depth: u8,
     pub is_dir: bool,
     pub category: u8,
+    /// A directory whose children were laid out; false for files.
+    pub expanded: bool,
 }
 
 /// Lays out any directory subtree into `viewport`.
@@ -107,8 +105,36 @@ fn layout_impl(
         }
         None => None,
     };
-    emit(tree, root, frame, 0, opts, visible, &mut out);
+    let pass = Pass {
+        tree,
+        opts,
+        visible,
+        max_depth: opts.max_depth.min(MAX_LAYOUT_DEPTH),
+        reveal_path: reveal_path(tree, root, opts.reveal),
+    };
+    pass.emit(root, frame, 0, &mut out);
     out
+}
+
+/// Root first, so index `d` is the node revealed at depth `d`. Empty unless
+/// `reveal` is live and under `root`.
+fn reveal_path(tree: &Tree, root: NodeId, reveal: Option<NodeId>) -> Vec<NodeId> {
+    let Some(reveal) = reveal.filter(|&id| tree.is_live(id)) else {
+        return Vec::new();
+    };
+    let mut path = vec![reveal];
+    let mut cur = reveal;
+    while cur != root {
+        match tree.node(cur).parent() {
+            Some(parent) => {
+                path.push(parent);
+                cur = parent;
+            }
+            None => return Vec::new(),
+        }
+    }
+    path.reverse();
+    path
 }
 
 /// Fills `visible` with subtree sizes that omit SYSTEM entries, for the
@@ -171,123 +197,140 @@ impl Frame {
             h: self.h - 2.0 * pad,
         }
     }
-
-    /// Takes `pad` off the top edge alone: the strip a label sits in.
-    fn below(&self, pad: f64) -> Frame {
-        Frame {
-            y: self.y + pad,
-            h: self.h - pad,
-            ..*self
-        }
-    }
 }
 
-fn emit(
-    tree: &Tree,
-    id: NodeId,
-    frame: Frame,
-    depth: u8,
-    opts: &TreemapOptions,
-    visible: Option<&[u64]>,
-    out: &mut Vec<TreemapRect>,
-) {
-    let node = tree.node(id);
-    out.push(TreemapRect {
-        id,
-        x: frame.x as f32,
-        y: frame.y as f32,
-        w: frame.w as f32,
-        h: frame.h as f32,
-        depth,
-        is_dir: node.is_dir(),
-        category: categorize(tree.name(id), node.is_dir()) as u8,
-    });
-    if !node.is_dir() || depth >= opts.max_depth {
-        return;
-    }
-    // Everything below changes only the *children's* frame. The rect pushed
-    // above must stay a function of this directory's own frame and nothing
-    // else, or a cap that stops recursion early would move the rects that
-    // survive it — the UI switches depth live and relies on them holding
-    // still.
-    let inner = frame.inset(opts.padding_px as f64);
-    if inner.w <= 0.0 || inner.h <= 0.0 {
-        return;
-    }
-    let body = inner.below(opts.label_px as f64);
-    // Adaptive depth: subdivide only where a child could still be legible.
-    // Going one level deeper costs padding, a label strip and the padding
-    // again, so a branch runs out of room on its own and stops — which is
-    // what keeps a big folder from dissolving into specks, and a small one
-    // from showing levels nobody can see. `max_depth` is only an upper bound
-    // on top of that.
-    if body.w < opts.min_side_px as f64 || body.h < opts.min_side_px as f64 {
-        return;
-    }
-    lay_children(tree, id, body, depth + 1, opts, visible, out);
+struct Pass<'a> {
+    tree: &'a Tree,
+    opts: &'a TreemapOptions,
+    visible: Option<&'a [u64]>,
+    max_depth: u8,
+    reveal_path: Vec<NodeId>,
 }
 
-fn lay_children(
-    tree: &Tree,
-    dir: NodeId,
-    frame: Frame,
-    depth: u8,
-    opts: &TreemapOptions,
-    visible: Option<&[u64]>,
-    out: &mut Vec<TreemapRect>,
-) {
-    let mut items: Vec<(NodeId, u64)> = tree
-        .children(dir)
-        .map(|c| (c, effective_size(tree, c, visible)))
-        .filter(|&(_, size)| size > 0)
-        .collect();
-    if items.is_empty() {
-        return;
-    }
-    items.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-
-    let total: f64 = items.iter().map(|&(_, s)| s as f64).sum();
-    let scale = frame.area() / total;
-    let min_side = opts.min_side_px as f64;
-
-    let mut remaining = frame;
-    let mut i = 0;
-    while i < items.len() {
-        if remaining.w <= 0.0 || remaining.h <= 0.0 {
+impl Pass<'_> {
+    fn emit(&self, id: NodeId, frame: Frame, depth: u8, out: &mut Vec<TreemapRect>) {
+        let node = self.tree.node(id);
+        let index = out.len();
+        out.push(TreemapRect {
+            id,
+            x: frame.x as f32,
+            y: frame.y as f32,
+            w: frame.w as f32,
+            h: frame.h as f32,
+            depth,
+            is_dir: node.is_dir(),
+            category: categorize(self.tree.name(id), node.is_dir()) as u8,
+            expanded: false,
+        });
+        let limit = if self.reveal_path.get(depth as usize) == Some(&id) {
+            MAX_LAYOUT_DEPTH
+        } else {
+            self.max_depth
+        };
+        if !node.is_dir() || depth >= limit {
             return;
         }
-        let side = remaining.w.min(remaining.h);
+        let inner = frame.inset(self.opts.padding_px as f64);
+        if inner.w <= 0.0 || inner.h <= 0.0 {
+            return;
+        }
+        self.lay_children(id, inner, depth + 1, out);
+        out[index].expanded = out.len() > index + 1;
+    }
 
-        let first = items[i].1 as f64 * scale;
-        let (mut sum, mut max, mut min) = (first, first, first);
-        let mut worst = worst_aspect(sum, max, min, side);
-        let mut j = i + 1;
-        while j < items.len() {
-            let a = items[j].1 as f64 * scale;
-            let candidate = worst_aspect(sum + a, max.max(a), min.min(a), side);
-            if candidate > worst {
-                break;
+    fn lay_children(&self, dir: NodeId, frame: Frame, depth: u8, out: &mut Vec<TreemapRect>) {
+        let mut items: Vec<(NodeId, u64)> = self
+            .tree
+            .children(dir)
+            .map(|c| (c, effective_size(self.tree, c, self.visible)))
+            .filter(|&(_, size)| size > 0)
+            .collect();
+        if items.is_empty() {
+            return;
+        }
+        items.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+        let total: f64 = items.iter().map(|&(_, s)| s as f64).sum();
+        let scale = frame.area() / total;
+
+        let mut remaining = frame;
+        let mut i = 0;
+        while i < items.len() {
+            if remaining.w <= 0.0 || remaining.h <= 0.0 {
+                return;
             }
-            worst = candidate;
-            sum += a;
-            max = max.max(a);
-            min = min.min(a);
-            j += 1;
+            let side = remaining.w.min(remaining.h);
+
+            let first = items[i].1 as f64 * scale;
+            let (mut sum, mut max, mut min) = (first, first, first);
+            let mut worst = worst_aspect(sum, max, min, side);
+            let mut j = i + 1;
+            while j < items.len() {
+                let a = items[j].1 as f64 * scale;
+                let candidate = worst_aspect(sum + a, max.max(a), min.min(a), side);
+                if candidate > worst {
+                    break;
+                }
+                worst = candidate;
+                sum += a;
+                max = max.max(a);
+                min = min.min(a);
+                j += 1;
+            }
+
+            self.lay_row(&items[i..j], scale, sum, &mut remaining, depth, out);
+            i = j;
+        }
+    }
+
+    fn lay_row(
+        &self,
+        row: &[(NodeId, u64)],
+        scale: f64,
+        row_area: f64,
+        remaining: &mut Frame,
+        depth: u8,
+        out: &mut Vec<TreemapRect>,
+    ) {
+        let horizontal = remaining.w < remaining.h; // row spans the full width
+        let side = if horizontal { remaining.w } else { remaining.h };
+        let thickness = (row_area / side).min(if horizontal { remaining.h } else { remaining.w });
+
+        let mut offset = 0.0;
+        for (k, &(id, size)) in row.iter().enumerate() {
+            let len = if k == row.len() - 1 {
+                side - offset
+            } else {
+                (size as f64 * scale) / thickness
+            };
+            let frame = if horizontal {
+                Frame {
+                    x: remaining.x + offset,
+                    y: remaining.y,
+                    w: len,
+                    h: thickness,
+                }
+            } else {
+                Frame {
+                    x: remaining.x,
+                    y: remaining.y + offset,
+                    w: thickness,
+                    h: len,
+                }
+            };
+            offset += len;
+            if frame.area() >= self.opts.min_area_px as f64 {
+                self.emit(id, frame, depth, out);
+            }
         }
 
-        lay_row(
-            tree,
-            &items[i..j],
-            scale,
-            sum,
-            &mut remaining,
-            depth,
-            min_side,
-            opts,
-            visible,
-            out,
-        );
-        i = j;
+        if horizontal {
+            remaining.y += thickness;
+            remaining.h -= thickness;
+        } else {
+            remaining.x += thickness;
+            remaining.w -= thickness;
+        }
     }
 }
 
@@ -295,60 +338,6 @@ fn worst_aspect(sum: f64, max: f64, min: f64, side: f64) -> f64 {
     let s2 = sum * sum;
     let w2 = side * side;
     (w2 * max / s2).max(s2 / (w2 * min))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn lay_row(
-    tree: &Tree,
-    row: &[(NodeId, u64)],
-    scale: f64,
-    row_area: f64,
-    remaining: &mut Frame,
-    depth: u8,
-    min_side: f64,
-    opts: &TreemapOptions,
-    visible: Option<&[u64]>,
-    out: &mut Vec<TreemapRect>,
-) {
-    let horizontal = remaining.w < remaining.h; // row spans the full width
-    let side = if horizontal { remaining.w } else { remaining.h };
-    let thickness = (row_area / side).min(if horizontal { remaining.h } else { remaining.w });
-
-    let mut offset = 0.0;
-    for (k, &(id, size)) in row.iter().enumerate() {
-        let len = if k == row.len() - 1 {
-            side - offset
-        } else {
-            (size as f64 * scale) / thickness
-        };
-        let frame = if horizontal {
-            Frame {
-                x: remaining.x + offset,
-                y: remaining.y,
-                w: len,
-                h: thickness,
-            }
-        } else {
-            Frame {
-                x: remaining.x,
-                y: remaining.y + offset,
-                w: thickness,
-                h: len,
-            }
-        };
-        offset += len;
-        if frame.w >= min_side && frame.h >= min_side {
-            emit(tree, id, frame, depth, opts, visible, out);
-        }
-    }
-
-    if horizontal {
-        remaining.y += thickness;
-        remaining.h -= thickness;
-    } else {
-        remaining.x += thickness;
-        remaining.w -= thickness;
-    }
 }
 
 #[cfg(test)]
@@ -384,15 +373,11 @@ mod tests {
         builder.finish()
     }
 
-    /// Nothing culled, nothing reserved: the pure squarified geometry the
-    /// exact-area assertions below are written against.
     fn no_padding() -> TreemapOptions {
         TreemapOptions {
-            min_side_px: 0.0,
+            min_area_px: 0.0,
             padding_px: 0.0,
-            label_px: 0.0,
-            max_depth: 32,
-            hide_system: false,
+            ..Default::default()
         }
     }
 
@@ -522,11 +507,8 @@ mod tests {
         let tree = builder.finish();
 
         let opts = TreemapOptions {
-            min_side_px: 0.0,
             padding_px: 2.0,
-            label_px: 0.0,
-            max_depth: 32,
-            hide_system: false,
+            ..no_padding()
         };
         let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
 
@@ -540,15 +522,11 @@ mod tests {
 
     #[test]
     fn tiny_children_are_culled_without_inflating_the_rest() {
-        // 1,000,000 vs 1: in 100×100 the small file gets a 100×0.0001 sliver,
-        // too thin to be legible at any width.
+        // 1,000,000 vs 1: in 100×100 the small file gets ~0.01 px² < 1 px².
         let tree = flat_tree(&[("big", 1_000_000), ("tiny", 1)]);
         let opts = TreemapOptions {
-            min_side_px: 1.0,
-            padding_px: 0.0,
-            label_px: 0.0,
-            max_depth: 32,
-            hide_system: false,
+            min_area_px: 1.0,
+            ..no_padding()
         };
         let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
 
@@ -556,133 +534,6 @@ mod tests {
         let big = rect_of(&rects, 1);
         // big keeps its proportional share; the sliver is just not drawn
         assert!((area(&big) - 10_000.0 * (1_000_000.0 / 1_000_001.0)).abs() < 1.0);
-    }
-
-    /// The floor is a side, not an area: 10,000 vs 1 in 100×100 gives the small
-    /// file a 100×0.01 slice worth a whole square pixel, which the old area
-    /// test happily drew as an invisible line.
-    #[test]
-    fn a_sliver_is_culled_even_though_its_area_clears_the_floor() {
-        let tree = flat_tree(&[("big", 10_000), ("thin", 1)]);
-        let opts = TreemapOptions {
-            min_side_px: 2.0,
-            padding_px: 0.0,
-            label_px: 0.0,
-            max_depth: 32,
-            hide_system: false,
-        };
-        let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
-
-        assert!(rects.iter().all(|r| r.id != 2), "sliver must be culled");
-        assert!((area(&rect_of(&rects, 1)) - 10_000.0 * (10_000.0 / 10_001.0)).abs() < 1.0);
-    }
-
-    /// Each level takes its strip out of its own children's frame, so a nested
-    /// directory starts one strip lower than its parent did. That compounding
-    /// is what makes depth cost pixels — and why it stops on its own.
-    #[test]
-    fn every_level_takes_its_label_strip_from_its_children() {
-        let mut b = EntryBatch::default();
-        b.push("root", entry(0, 0, DIR, 0));
-        b.push("d1", entry(1, 0, DIR, 0));
-        b.push("d2", entry(2, 1, DIR, 0));
-        b.push("f", entry(3, 2, FILE, 100));
-        let mut builder = TreeBuilder::new();
-        builder.add_batch(&b);
-        let tree = builder.finish();
-
-        let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &labelled(10.0));
-
-        // The root's own rect is the whole viewport: the strip is taken below
-        // it, not out of it.
-        assert!((rect_of(&rects, 0).y).abs() < 0.01);
-        assert!((rect_of(&rects, 0).h - 100.0).abs() < 0.01);
-        for (id, top, height) in [(1u32, 10.0, 90.0), (2, 20.0, 80.0), (3, 30.0, 70.0)] {
-            let r = rect_of(&rects, id);
-            assert!((r.y - top).abs() < 0.01, "id {id} starts a strip lower");
-            assert!(
-                (r.h - height).abs() < 0.01,
-                "id {id} lost a strip off its height"
-            );
-            assert!((r.w - 100.0).abs() < 0.01, "a strip is vertical");
-        }
-    }
-
-    /// Depth changes stay live because a capped layout is a prefix of a deeper
-    /// one. The strip is the one addition that could break it — it has to
-    /// shrink frames the cap then hides anyway, never the rect a shallower
-    /// layout keeps.
-    #[test]
-    fn a_label_strip_does_not_move_the_rects_a_cap_leaves_behind() {
-        let mut b = EntryBatch::default();
-        b.push("root", entry(0, 0, DIR, 0));
-        b.push("d1", entry(1, 0, DIR, 0));
-        b.push("big", entry(2, 0, FILE, 400));
-        b.push("d2", entry(3, 1, DIR, 0));
-        b.push("f", entry(4, 1, FILE, 200));
-        b.push("g", entry(5, 3, FILE, 100));
-        let mut builder = TreeBuilder::new();
-        builder.add_batch(&b);
-        let tree = builder.finish();
-        let vp = Viewport { w: 400.0, h: 300.0 };
-
-        let capped = layout(&tree, 0, vp, &capped_at(2, 10.0));
-        let deep: Vec<TreemapRect> = layout(&tree, 0, vp, &capped_at(8, 10.0))
-            .into_iter()
-            .filter(|r| r.depth <= 2)
-            .collect();
-
-        assert_eq!(capped, deep);
-        assert!(capped.iter().any(|r| r.id == 3), "depth-2 dir is emitted");
-        assert!(capped.iter().all(|r| r.id != 5), "depth-3 file is not");
-    }
-
-    /// Depth follows the pixels available: the same subtree expands when it has
-    /// room and stops when it does not, with `max_depth` nowhere near either.
-    #[test]
-    fn a_directory_stops_expanding_when_its_interior_is_too_small() {
-        let mut b = EntryBatch::default();
-        b.push("root", entry(0, 0, DIR, 0));
-        b.push("wide", entry(1, 0, FILE, 800));
-        b.push("mid", entry(2, 0, DIR, 0));
-        b.push("deep", entry(3, 2, FILE, 200));
-        let mut builder = TreeBuilder::new();
-        builder.add_batch(&b);
-        let tree = builder.finish();
-
-        let opts = TreemapOptions {
-            min_side_px: 25.0,
-            ..labelled(10.0)
-        };
-
-        // A 40px-tall viewport leaves `mid` 30px, and its own strip takes 10:
-        // the 20px left cannot hold a child, so it stays a plain plate.
-        let cramped = layout(&tree, 0, Viewport { w: 200.0, h: 40.0 }, &opts);
-        assert!(cramped.iter().any(|r| r.id == 2), "the dir itself is drawn");
-        assert!(
-            cramped.iter().all(|r| r.id != 3),
-            "its interior cannot hold a legible child"
-        );
-
-        // The same tree given more height expands, and nobody raised a cap.
-        let roomy = layout(&tree, 0, Viewport { w: 200.0, h: 100.0 }, &opts);
-        assert!(roomy.iter().any(|r| r.id == 3), "now there is room");
-        assert!(opts.max_depth > 1, "the cap never came into it");
-    }
-
-    fn labelled(label_px: f32) -> TreemapOptions {
-        TreemapOptions {
-            label_px,
-            ..no_padding()
-        }
-    }
-
-    fn capped_at(max_depth: u8, label_px: f32) -> TreemapOptions {
-        TreemapOptions {
-            max_depth,
-            label_px,
-            ..no_padding()
-        }
     }
 
     #[test]
@@ -709,16 +560,18 @@ mod tests {
         let tree = builder.finish();
 
         let opts = TreemapOptions {
-            min_side_px: 0.0,
-            padding_px: 0.0,
-            label_px: 0.0,
             max_depth: 1,
-            hide_system: false,
+            ..no_padding()
         };
         let rects = layout(&tree, 0, Viewport { w: 100.0, h: 100.0 }, &opts);
 
         assert!(rects.iter().any(|r| r.id == 1), "depth-1 dir emitted");
         assert!(rects.iter().all(|r| r.id != 2), "depth-2 file not emitted");
+        assert_eq!(area(&rect_of(&rects, 1)), 10_000.0);
+
+        let drilled = layout(&tree, 1, Viewport { w: 100.0, h: 100.0 }, &opts);
+        assert_eq!(rect_of(&drilled, 2).depth, 1);
+        assert_eq!(area(&rect_of(&drilled, 2)), 10_000.0);
     }
 
     #[test]
@@ -871,5 +724,161 @@ mod tests {
         assert!(hidden.iter().all(|r| r.id != 3 && r.id != 4));
         assert!((area(&rect_of(&hidden, 1)) - 10_000.0).abs() < 1.0);
         assert!((area(&rect_of(&hidden, 2)) - 10_000.0).abs() < 1.0);
+    }
+
+    /// root { x { xa 300, y { ya 100 } }, z { za 400 }, w 200 }
+    fn open_tree() -> Tree {
+        let mut b = EntryBatch::default();
+        b.push("root", entry(0, 0, DIR, 0));
+        b.push("x", entry(1, 0, DIR, 0));
+        b.push("xa", entry(2, 1, FILE, 300));
+        b.push("y", entry(3, 1, DIR, 0));
+        b.push("ya", entry(4, 3, FILE, 100));
+        b.push("z", entry(5, 0, DIR, 0));
+        b.push("za", entry(6, 5, FILE, 400));
+        b.push("w", entry(7, 0, FILE, 200));
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&b);
+        builder.finish()
+    }
+
+    fn capped(max_depth: u8, reveal: Option<NodeId>) -> TreemapOptions {
+        TreemapOptions {
+            max_depth,
+            reveal,
+            ..no_padding()
+        }
+    }
+
+    const VIEW: Viewport = Viewport { w: 100.0, h: 100.0 };
+
+    fn geometry(rects: &[TreemapRect]) -> Vec<(NodeId, [u32; 4], u8)> {
+        rects
+            .iter()
+            .map(|r| (r.id, [r.x, r.y, r.w, r.h].map(f32::to_bits), r.depth))
+            .collect()
+    }
+
+    #[test]
+    fn revealing_a_folder_adds_its_children_and_moves_nothing() {
+        let tree = open_tree();
+        let closed = layout(&tree, 0, VIEW, &capped(1, None));
+        let opened = layout(&tree, 0, VIEW, &capped(1, Some(1)));
+
+        let before = geometry(&closed);
+        let after = geometry(&opened);
+        for g in &before {
+            assert!(after.contains(g), "rect {} moved or vanished", g.0);
+        }
+        let mut added: Vec<_> = after.iter().filter(|g| !before.contains(g)).collect();
+        added.sort_by_key(|g| g.0);
+        assert_eq!(added.len(), 2);
+        assert_eq!((added[0].0, added[0].2), (2, 2));
+        assert_eq!((added[1].0, added[1].2), (3, 2));
+        assert!(!rect_of(&closed, 1).expanded);
+        assert!(rect_of(&opened, 1).expanded);
+    }
+
+    #[test]
+    fn revealing_a_nested_folder_keeps_its_parent_open() {
+        let tree = open_tree();
+        let rects = layout(&tree, 0, VIEW, &capped(1, Some(3)));
+
+        assert!(rects.iter().any(|r| r.id == 2), "x stays open");
+        assert!(rects.iter().any(|r| r.id == 4), "y opens");
+        assert!(rects.iter().all(|r| r.id != 6), "z stays closed");
+    }
+
+    #[test]
+    fn revealing_a_file_opens_the_folders_above_it() {
+        let tree = open_tree();
+        let rects = layout(&tree, 0, VIEW, &capped(1, Some(4)));
+
+        assert!(rects.iter().any(|r| r.id == 4), "ya drawn");
+        assert!(rect_of(&rects, 1).expanded);
+        assert!(rect_of(&rects, 3).expanded);
+        assert!(!rect_of(&rects, 5).expanded);
+    }
+
+    #[test]
+    fn a_reveal_that_is_not_hidden_under_the_view_changes_nothing() {
+        let tree = open_tree();
+        let closed = layout(&tree, 1, VIEW, &capped(1, None));
+
+        assert_eq!(
+            layout(&tree, 1, VIEW, &capped(1, Some(5))),
+            closed,
+            "other branch"
+        );
+        assert_eq!(
+            layout(&tree, 1, VIEW, &capped(1, Some(999))),
+            closed,
+            "dead id"
+        );
+        assert_eq!(
+            layout(&tree, 1, VIEW, &capped(1, Some(2))),
+            closed,
+            "visible file"
+        );
+        assert_eq!(
+            layout(&tree, 1, VIEW, &capped(1, Some(1))),
+            closed,
+            "the root"
+        );
+        let wide = layout(&tree, 0, VIEW, &capped(2, None));
+        assert_eq!(
+            layout(&tree, 0, VIEW, &capped(2, Some(1))),
+            wide,
+            "already open"
+        );
+    }
+
+    #[test]
+    fn only_folders_with_children_drawn_are_expanded() {
+        let tree = open_tree();
+        let rects = layout(&tree, 0, VIEW, &capped(1, None));
+
+        assert!(rect_of(&rects, 0).expanded, "root");
+        assert!(!rect_of(&rects, 1).expanded, "x at the cap");
+        assert!(!rect_of(&rects, 7).expanded, "file");
+    }
+
+    #[test]
+    fn nothing_is_drawn_past_the_hard_depth_limit() {
+        let mut b = EntryBatch::default();
+        b.push("root", entry(0, 0, DIR, 0));
+        for id in 1..40 {
+            b.push("d", entry(id, id - 1, DIR, 0));
+        }
+        b.push("f", entry(40, 39, FILE, 1));
+        let mut builder = TreeBuilder::new();
+        builder.add_batch(&b);
+        let tree = builder.finish();
+
+        let deepest_closed = layout(&tree, 0, VIEW, &capped(32, None))
+            .iter()
+            .map(|r| r.depth)
+            .max();
+        let deepest_open = layout(&tree, 0, VIEW, &capped(1, Some(39)))
+            .iter()
+            .map(|r| r.depth)
+            .max();
+
+        assert_eq!(deepest_closed, Some(MAX_LAYOUT_DEPTH));
+        assert_eq!(deepest_open, Some(MAX_LAYOUT_DEPTH));
+    }
+
+    #[test]
+    fn an_open_folder_shows_only_what_the_filter_keeps() {
+        let tree = open_tree();
+        // root, x, xa, y(out), ya(out), z, za, w
+        let bytes = vec![900u64, 300, 300, 0, 0, 400, 400, 200];
+        let rects = layout_with_filter(&tree, 0, VIEW, &capped(1, Some(1)), &bytes);
+
+        assert!(
+            rects.iter().all(|r| r.id != 3),
+            "filtered-out folder omitted"
+        );
+        assert_eq!(area(&rect_of(&rects, 2)), area(&rect_of(&rects, 1)));
     }
 }

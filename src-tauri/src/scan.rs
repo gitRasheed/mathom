@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use mathom_core::export::ExportOptions;
 use mathom_core::search::{FilterOverlay, SearchQuery};
 use mathom_core::tree::{NodeId, Tree};
-use mathom_core::{EntryFlags, TreeBuilder, TreemapOptions, Viewport, treemap};
+use mathom_core::{EntryFlags, MAX_LAYOUT_DEPTH, TreeBuilder, TreemapOptions, Viewport, treemap};
 use mathom_scanner::{GenericScanner, ScanEvent, ScanHandle, ScanOptions, Scanner};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -168,9 +168,22 @@ pub struct TreemapRectDto {
     depth: u8,
     is_dir: bool,
     category: u8,
-    /// What the block is called; the canvas draws it inside the rect.
-    name: String,
-    size: u64,
+    expanded: bool,
+    /// Only on folded directories under a depth cap, the ones the UI labels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreemapArgs {
+    width: f32,
+    height: f32,
+    hide_system: bool,
+    filter: Option<String>,
+    /// `None` draws every level.
+    max_depth: Option<u8>,
+    reveal: Option<NodeId>,
 }
 
 #[derive(Clone, Serialize)]
@@ -341,26 +354,12 @@ pub fn get_path(state: State<'_, AppState>, generation: u64, id: NodeId) -> Resu
     Ok(tree.path(id))
 }
 
-/// Legibility floor for a treemap rect, in CSS pixels: below this on either
-/// side the block is not drawn, so the map never fills with specks. Mirrored
-/// as `TREEMAP_MIN_SIDE_PX` in `ui/src/lib/prefs.ts`.
-const TREEMAP_MIN_SIDE_PX: f32 = 6.0;
-
-/// The strip a directory reserves at the top of its interior for its label —
-/// and therefore the height the UI has to draw that label in. Mirrored as
-/// `TREEMAP_LABEL_PX` in `ui/src/lib/prefs.ts`: the two have to agree or the
-/// text lands on the children instead of above them.
-const TREEMAP_LABEL_PX: f32 = 15.0;
-
 #[tauri::command(async)]
 pub fn get_treemap(
     state: State<'_, AppState>,
     generation: u64,
     root_id: NodeId,
-    width: f32,
-    height: f32,
-    hide_system: bool,
-    filter: Option<String>,
+    args: TreemapArgs,
 ) -> Result<Vec<TreemapRectDto>, String> {
     let session = session_for(&state, generation)?;
     let builder = session.builder.read().unwrap();
@@ -372,24 +371,21 @@ pub fn get_treemap(
         return Ok(Vec::new());
     }
     let opts = TreemapOptions {
-        min_side_px: TREEMAP_MIN_SIDE_PX,
+        min_area_px: 3.0,
         padding_px: 1.0,
-        label_px: TREEMAP_LABEL_PX,
-        max_depth: 24,
-        hide_system,
+        max_depth: args.max_depth.map_or(MAX_LAYOUT_DEPTH, |d| d.max(1)),
+        hide_system: args.hide_system,
+        reveal: args.reveal,
     };
+    let capped = args.max_depth.is_some();
     let viewport = Viewport {
-        w: width,
-        h: height,
+        w: args.width,
+        h: args.height,
     };
-    let rects = match overlay_for(&session, tree, filter.as_deref(), hide_system) {
+    let rects = match overlay_for(&session, tree, args.filter.as_deref(), args.hide_system) {
         Some(o) => treemap::layout_with_filter(tree, root_id, viewport, &opts, &o.bytes),
         None => treemap::layout(tree, root_id, viewport, &opts),
     };
-    // The label's text rides along with the geometry: a rect the user can see
-    // is a rect they can read, and asking per node would be one round trip per
-    // rectangle. The culling above is what keeps the payload honest — what is
-    // sent is roughly what fits on screen, not the whole subtree.
     Ok(rects
         .into_iter()
         .map(|r| TreemapRectDto {
@@ -401,8 +397,8 @@ pub fn get_treemap(
             depth: r.depth,
             is_dir: r.is_dir,
             category: r.category,
-            name: tree.name(r.id).to_string(),
-            size: tree.node(r.id).size,
+            expanded: r.expanded,
+            name: (capped && r.is_dir && !r.expanded).then(|| tree.name(r.id).to_owned()),
         })
         .collect())
 }

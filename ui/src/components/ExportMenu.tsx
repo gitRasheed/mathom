@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api, type ExportFormat } from "../lib/api";
 import { copyText } from "../lib/clipboard";
+import { DepthPicker } from "./DepthPicker";
 import { ExportIcon } from "./icons";
 
-const DEPTHS = ["all", "1", "2"] as const;
+const DEPTH_PRESETS = [null, 1, 2] as const;
+const MAX_EXPORT_DEPTH = 999;
 
 interface ExportMenuProps {
   generation: number;
@@ -21,9 +23,8 @@ export function ExportMenu({
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [format, setFormat] = useState<ExportFormat>("csv");
-  // "all", "1", "2", or whatever digits sit in the custom box.
-  const [depth, setDepth] = useState("all");
-  const [custom, setCustom] = useState("3");
+  const [depth, setDepth] = useState<number | null>(null);
+  const [customDepth, setCustomDepth] = useState(3);
   const [dirsOnly, setDirsOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(
@@ -51,7 +52,7 @@ export function ExportMenu({
     setBusy(true);
     setStatus(null);
     const args = {
-      maxDepth: depth === "all" ? null : Math.max(1, Number(depth) || 1),
+      maxDepth: depth,
       dirsOnly,
       hideSystem,
     };
@@ -128,44 +129,14 @@ export function ExportMenu({
           <div className="mt-3 text-[11px] font-medium tracking-wide text-ink-4 uppercase">
             Depth
           </div>
-          <div className="mt-1.5 flex rounded-md border border-edge p-0.5">
-            {DEPTHS.map((d) => (
-              <button
-                key={d}
-                onClick={() => setDepth(d)}
-                className={`h-6 flex-1 rounded text-[12px] ${
-                  depth === d
-                    ? "bg-raised text-ink"
-                    : "text-ink-4 hover:text-ink-2"
-                }`}
-              >
-                {d === "all" ? "All" : d}
-              </button>
-            ))}
-            <input
-              value={custom}
-              onFocus={() => setDepth(custom)}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, "").slice(0, 3);
-                setCustom(v);
-                setDepth(v);
-              }}
-              onBlur={() => {
-                if (/^[1-9]\d{0,2}$/.test(custom)) return;
-                setCustom("3");
-                if (!DEPTHS.includes(depth as (typeof DEPTHS)[number])) {
-                  setDepth("3");
-                }
-              }}
-              placeholder="3+"
-              title="Any depth — type a number"
-              className={`h-6 w-0 min-w-0 flex-1 rounded text-center text-[12px] outline-none placeholder:text-ink-5 ${
-                !DEPTHS.includes(depth as (typeof DEPTHS)[number])
-                  ? "bg-raised text-ink"
-                  : "bg-transparent text-ink-4 hover:text-ink-2"
-              }`}
-            />
-          </div>
+          <DepthPicker
+            value={depth}
+            presets={DEPTH_PRESETS}
+            custom={customDepth}
+            max={MAX_EXPORT_DEPTH}
+            onChange={setDepth}
+            onCustom={setCustomDepth}
+          />
           <label className="mt-3 flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-3 select-none">
             <input
               type="checkbox"
